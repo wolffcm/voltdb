@@ -20,6 +20,7 @@
 
 #include "Topend.h"
 #include "common/UndoQuantum.h"
+#include "common/CodegenContext.hpp"
 
 namespace voltdb {
 
@@ -150,6 +151,12 @@ class ExecutorContext {
     DRTupleStream* drReplicatedStream() {
         return m_drReplicatedStream;
     }
+    
+    PredFunction compilePredicate(const std::string& fnName,
+                                  const TupleSchema* tupleSchema,
+                                  const AbstractExpression* expr);
+
+    PlanNodeFunction compilePlanNode(AbstractExecutor* executor);
 
     static ExecutorContext* getExecutorContext();
 
@@ -175,6 +182,9 @@ class ExecutorContext {
     int64_t m_spHandle;
     int64_t m_uniqueId;
     int64_t m_currentTxnTimestamp;
+
+    CodegenContext *m_codegenContext;
+
   public:
     int64_t m_lastCommittedSpHandle;
     int64_t m_siteId;

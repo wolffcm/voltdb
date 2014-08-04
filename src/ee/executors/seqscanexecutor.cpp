@@ -74,6 +74,21 @@ bool SeqScanExecutor::p_init(AbstractPlanNode* abstract_node,
     assert(isSubquery || node->getTargetTable());
     assert((! isSubquery) || (node->getChildren().size() == 1));
 
+    m_planNodeFunction = compilePlanNode(this);
+
+    if (! m_planNodeFunction) {
+        // If we couldn't generate code for the plan node, maybe we
+        // could at least generate code for the predicate
+        if (node->getPredicate()) {
+            Table* input_table = (node->isSubQuery()) ?
+                node->getChildren()[0]->getOutputTable():
+                node->getTargetTable();
+            m_predFunction = compilePredicate("seq_scan_pred",
+                                              input_table->schema(),
+                                              node->getPredicate());
+        }
+    }
+
     //
     // OPTIMIZATION: If there is no predicate for this SeqScan,
     // then we want to just set our OutputTable pointer to be the
@@ -89,12 +104,12 @@ bool SeqScanExecutor::p_init(AbstractPlanNode* abstract_node,
                 node->getTargetTable()->name();
         setTempOutputTable(limits, temp_name);
     }
-    //
-    // Otherwise create a new temp table that mirrors the
-    // output schema specified in the plan (which should mirror
-    // the output schema for any inlined projection)
-    //
     else {
+        //
+        // Otherwise create a new temp table that mirrors the
+        // output schema specified in the plan (which should mirror
+        // the output schema for any inlined projection)
+        //
         node->setOutputTable(isSubquery ?
                              node->getChildren()[0]->getOutputTable() :
                              node->getTargetTable());
@@ -117,6 +132,10 @@ bool SeqScanExecutor::p_execute(const NValueArray &params) {
             node->getTargetTable();
 
     assert(input_table);
+
+    if (m_planNodeFunction) {
+        return m_planNodeFunction(input_table, output_table);
+    }
 
     //* for debug */std::cout << "SeqScanExecutor: node id " << node->getPlanNodeId() <<
     //* for debug */    " input table " << (void*)input_table <<
@@ -204,7 +223,20 @@ bool SeqScanExecutor::p_execute(const NValueArray &params) {
             //
             // For each tuple we need to evaluate it against our predicate
             //
-            if (predicate == NULL || predicate->eval(&tuple, NULL).isTrue())
+            bool no_pred_or_true;
+            if (predicate) {
+                if (m_predFunction) {
+                    no_pred_or_true = (m_predFunction(tuple.address()) == 0x1);
+                }
+                else {
+                    no_pred_or_true = predicate->eval(&tuple, NULL).isTrue();
+                }
+            }
+            else {
+                no_pred_or_true = true;
+            }
+
+            if (no_pred_or_true)
             {
                 // Check if we have to skip this tuple because of offset
                 if (tuple_skipped < offset) {

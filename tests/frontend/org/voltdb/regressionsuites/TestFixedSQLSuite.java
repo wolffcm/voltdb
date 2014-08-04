@@ -1757,6 +1757,7 @@ public class TestFixedSQLSuite extends RegressionSuite {
         validateTableOfScalarLongs(vt, new long[]{0});
     }
 
+
     public void testInsertWithCast() throws Exception {
         Client client = getClient();
         client.callProcedure("@AdHoc", "delete from p1");
@@ -1857,7 +1858,6 @@ public class TestFixedSQLSuite extends RegressionSuite {
                 + "on t1.ti1 = t2.bi",
                 new long[][] {});
     }
-
     private void insertForInParamsTests(Client client) throws Exception {
         for (int i = 0; i < 10; ++i) {
             VoltTable vt = client.callProcedure("P1.insert",

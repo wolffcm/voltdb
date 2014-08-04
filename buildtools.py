@@ -126,11 +126,13 @@ def buildMakefile(CTX):
         MAKECPPFLAGS += " -isystem ../../%s" % (dir)
     for dir in CTX.INCLUDE_DIRS:
         MAKECPPFLAGS += " -I../../%s" % (dir)
+    MAKECPPFLAGS += " -I%s" % (getLlvmIncludeDir())
     LOCALCPPFLAGS = CPPFLAGS
     for dir in CTX.SYSTEM_DIRS:
         LOCALCPPFLAGS += " -isystem %s" % (dir)
     for dir in CTX.INCLUDE_DIRS:
         LOCALCPPFLAGS += " -I%s" % (dir)
+    LOCALCPPFLAGS += " -I%s" % (getLlvmIncludeDir())
     JNILIBFLAGS = " ".join(CTX.JNILIBFLAGS.split())
     JNIBINFLAGS = " ".join(CTX.JNIBINFLAGS.split())
     INPUT_PREFIX = CTX.INPUT_PREFIX.rstrip("/")
@@ -213,7 +215,7 @@ def buildMakefile(CTX):
 
     makefile.write("# main jnilib target\n")
     makefile.write("nativelibs/libvoltdb-%s.$(JNIEXT): " % version + " ".join(jni_objects) + "\n")
-    makefile.write("\t$(LINK.cpp) $(JNILIBFLAGS) -o $@ $^\n")
+    makefile.write("\t$(LINK.cpp) -shared -o $@ $^ $(JNILIBFLAGS) \n")
     makefile.write("\n")
 
     makefile.write("# voltdb instance that loads the jvm from C++\n")
@@ -298,7 +300,7 @@ def buildMakefile(CTX):
 
         # link the test
         makefile.write("%s: %s objects/volt.a\n" % (binname, objectname))
-        makefile.write("\t$(LINK.cpp) -o %s %s objects/volt.a\n" % (binname, objectname))
+        makefile.write("\t$(LINK.cpp) -o %s %s objects/volt.a %s\n" % (binname, objectname, getLlvmLibs()))
         targetpath = OUTPUT_PREFIX + "/" + "/".join(binname.split("/")[:-1])
         os.system("mkdir -p %s" % (targetpath))
 
@@ -309,6 +311,35 @@ def buildMakefile(CTX):
     makefile.write("\n")
     makefile.close()
     return True
+
+def getLlvmConfigOutput(args):
+    command = 'llvm-config ' + args
+    pipe = Popen(args=command, shell=True, bufsize=-1, stdout=PIPE, stderr=PIPE)
+    out = pipe.stdout.readlines()
+    out_err = pipe.stderr.readlines()
+    retcode = pipe.wait()
+    if retcode != 0:
+        print "Error calling llvm-config"
+        print ''.join(out_err)
+        sys.exit(-1)
+    return ''.join(out)
+
+def getLlvmLibs():
+    cmd_output = getLlvmConfigOutput('--ldflags --libs core jit native')
+    flag_list = cmd_output.split()
+    # Library arguments are not ordered correctly for linux
+    # -ltinfo, which is required by linux, must be last.
+    if flag_list.count('-ltinfo') > 0:
+        flag_list.remove('-ltinfo')
+        flag_list.append('-ltinfo')
+    if flag_list.count('-ldl') > 0:
+        flag_list.remove('-ldl')
+        flag_list.append('-ldl')
+    return " ".join(flag_list)
+
+# This may need to be called if LLVM headers are not in the system include dirs.
+def getLlvmIncludeDir():
+    return getLlvmConfigOutput('--includedir').strip()
 
 def buildIPC(CTX):
     retval = os.system("make --directory=%s prod/voltdbipc -j4" % (CTX.OUTPUT_PREFIX))
@@ -407,4 +438,3 @@ def getCompilerVersion():
 
 # get the version of gcc and make it avaliable
 compiler_name, compiler_major, compiler_minor, compiler_point = getCompilerVersion()
-

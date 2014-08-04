@@ -65,6 +65,8 @@ if CTX.PROFILE:
 # linker flags
 CTX.LDFLAGS += """ -g3"""
 CTX.LASTLDFLAGS = """ -ldl"""
+CTX.LASTLDFLAGS += (" " + getLlvmLibs() + " ")
+
 
 if CTX.COVERAGE:
     CTX.LDFLAGS += " -ftest-coverage -fprofile-arcs"
@@ -127,7 +129,7 @@ CTX.OUTPUT_PREFIX += "/"
 
 # Defaults Section
 CTX.JNIEXT = "so"
-CTX.JNILIBFLAGS += " -shared"
+CTX.JNILIBFLAGS += " " + getLlvmLibs() + " "
 CTX.SOFLAGS += " -shared"
 CTX.SOEXT = "so"
 out = Popen('java -cp tools/ SystemPropertyPrinter java.library.path'.split(),
@@ -135,12 +137,13 @@ out = Popen('java -cp tools/ SystemPropertyPrinter java.library.path'.split(),
 libpaths = ' '.join( '-L' + path for path in out.strip().split(':') if path != '' and path != '/usr/lib' )
 CTX.JNIBINFLAGS += " " + libpaths
 CTX.JNIBINFLAGS += " -ljava -ljvm -lverify"
+CTX.JNIBINFLAGS += " " + getLlvmLibs() + " "
 
 if CTX.PLATFORM == "Darwin":
     CTX.CPPFLAGS += " -DMACOSX -arch x86_64"
     CTX.JNIEXT = "jnilib"
-    CTX.JNILIBFLAGS = " -bundle"
-    CTX.JNIBINFLAGS = " -framework JavaVM,1.7"
+    #CTX.JNILIBFLAGS += " -bundle"
+    CTX.JNIBINFLAGS += " -framework JavaVM,1.7"
     CTX.SOFLAGS += "-dynamiclib -undefined dynamic_lookup -single_module"
     CTX.SOEXT = "dylib"
     CTX.JNIFLAGS = "-framework JavaVM,1.7"
@@ -186,6 +189,7 @@ CTX.INPUT['structures'] = """
 """
 
 CTX.INPUT['common'] = """
+ CodegenContext.cpp
  CompactingStringPool.cpp
  CompactingStringStorage.cpp
  FatalException.cpp

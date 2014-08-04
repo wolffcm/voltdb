@@ -90,9 +90,17 @@ public:
         return this->m_valueIdx;
     }
 
+    int getValueIdx() const {
+        return m_valueIdx;
+    }
+
+    const NValue* getParamValue() const {
+        return m_paramValue;
+    }
+
   private:
     int m_valueIdx;
-    voltdb::NValue* m_paramValue;
+    const voltdb::NValue* m_paramValue;
 };
 
 }

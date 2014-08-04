@@ -122,6 +122,11 @@ class AbstractExecutor {
      */
     void setDMLCountOutputTable(TempTableLimits* limits);
 
+    static PredFunction compilePredicate(const std::string& fnName,
+                                         const TupleSchema* tupleSchema,
+                                         const AbstractExpression *expr);
+    static PlanNodeFunction compilePlanNode(AbstractExecutor* executor);
+
     // execution engine owns the plannode allocation.
     AbstractPlanNode* m_abstractNode;
     TempTable* m_tmpOutputTable;

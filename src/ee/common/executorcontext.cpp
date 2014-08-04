@@ -47,6 +47,7 @@ ExecutorContext::ExecutorContext(int64_t siteId,
     m_drStream(drStream),
     m_drReplicatedStream(drReplicatedStream),
     m_engine(engine),
+    m_codegenContext(new CodegenContext()),
     m_txnId(0),
     m_spHandle(0),
     m_lastCommittedSpHandle(0),
@@ -70,6 +71,9 @@ void ExecutorContext::bindToThread()
 
 ExecutorContext::~ExecutorContext() {
     // currently does not own any of its pointers
+    // execpt for the CodegenContext
+    delete m_codegenContext;
+    CodegenContext::shutdownLlvm();
 
     // There can be only one (per thread).
     assert(pthread_getspecific( static_key) == this);
@@ -83,4 +87,16 @@ ExecutorContext* ExecutorContext::getExecutorContext() {
     (void)pthread_once(&static_keyOnce, createThreadLocalKey);
     return static_cast<ExecutorContext*>(pthread_getspecific( static_key));
 }
+
+PredFunction ExecutorContext::compilePredicate(const std::string& fnName,
+                                               const TupleSchema* tupleSchema,
+                                               const AbstractExpression* expr) {
+    return m_codegenContext->compilePredicate(fnName, tupleSchema, expr);
+}
+
+PlanNodeFunction ExecutorContext::compilePlanNode(AbstractExecutor* executor) {
+    return m_codegenContext->compilePlanNode(executor);
+}
+
+
 }

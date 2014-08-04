@@ -179,3 +179,15 @@ void AbstractExecutor::setDMLCountOutputTable(TempTableLimits* limits) {
 
 
 AbstractExecutor::~AbstractExecutor() {}
+
+PredFunction AbstractExecutor::compilePredicate(const std::string& fnName,
+                                                const TupleSchema* tupleSchema,
+                                                const AbstractExpression *expr) {
+    return ExecutorContext::getExecutorContext()->compilePredicate(fnName,
+                                                                   tupleSchema,
+                                                                   expr);
+}
+
+PlanNodeFunction AbstractExecutor::compilePlanNode(AbstractExecutor* executor) {
+    return ExecutorContext::getExecutorContext()->compilePlanNode(executor);
+}
