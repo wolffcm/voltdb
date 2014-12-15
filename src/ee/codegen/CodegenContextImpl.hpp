@@ -24,6 +24,7 @@
 #include "llvm/IR/IRBuilder.h"
 
 #include <string>
+#include <sstream>
 
 namespace llvm {
 class ExecutionEngine;
@@ -58,7 +59,7 @@ namespace voltdb {
 
         llvm::Type* getLlvmType(ValueType voltType);
 
-        // returns an llvm integer type that can store an pointer on the jit's target
+        // returns an llvm integer type that can store a pointer on the jit's target
         llvm::IntegerType* getIntPtrType();
 
         ~CodegenContextImpl();
@@ -77,6 +78,24 @@ namespace voltdb {
         std::string m_errorString;
    };
 
+    // This is thrown if we encounter something we can't yet generate
+    // code for.  In this case, we can always fall back to
+    // interpreting the expression.
+    class UnsupportedForCodegenException {
+    public:
+        UnsupportedForCodegenException(const std::string& message)
+            : m_message(message)
+        {}
+
+        std::string getMessage() const {
+            std::ostringstream oss;
+            oss << "Unsupported for codegen: " << m_message;
+            return oss.str();
+        }
+
+    private:
+        const std::string m_message;
+    };
 }
 
 #endif

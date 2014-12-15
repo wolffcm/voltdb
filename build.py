@@ -191,6 +191,7 @@ CTX.INPUT['structures'] = """
 CTX.INPUT['codegen'] = """
  CodegenContext.cpp
  CodegenContextImpl.cpp
+ ExprGenerator.cpp
 """
 
 CTX.INPUT['common'] = """

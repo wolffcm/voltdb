@@ -25,6 +25,7 @@
 #define VOLT_LOG_LEVEL VOLT_LEVEL_DEBUG
 
 #include "codegen/CodegenContextImpl.hpp"
+#include "codegen/ExprGenerator.hpp"
 #include "common/SQLException.h"
 #include "common/TupleSchema.h"
 #include "common/debuglog.h"
@@ -61,26 +62,6 @@ static void initializeNativeTarget() {
 }
 
 namespace voltdb {
-
-    namespace {
-        // This is thrown if we encounter something we can't yet generate code for.
-        // In this case, we can always fall back to interpreting the expression.
-        class UnsupportedForCodegenException {
-        public:
-            UnsupportedForCodegenException(const std::string& message)
-                : m_message(message)
-            {}
-
-            std::string getMessage() const {
-                std::ostringstream oss;
-                oss << "Unsupported for codegen: " << m_message;
-                return oss.str();
-            }
-
-        private:
-            const std::string m_message;
-        };
-    }
 
     static llvm::Value* getNullValueForType(llvm::Type* ty) {
         if (!ty->isIntegerTy()) {
@@ -165,8 +146,9 @@ namespace voltdb {
 
             void codegen(const TupleSchema* tupleSchema,
                          const AbstractExpression* expr) {
-                CGValue answer = codegenExpr(tupleSchema, expr);
-                builder().CreateRet(answer.val());
+                ExprGenerator generator(m_codegenContext, m_function, m_builder.get(), getTupleArg());
+                llvm::Value* answer = generator.generate(tupleSchema, expr);
+                builder().CreateRet(answer);
             }
 
             llvm::Function* getFunction() {
@@ -221,7 +203,7 @@ namespace voltdb {
                 return m_codegenContext->getLlvmType(voltType);
             }
 
-              llvm::Value* getTupleArg() {
+            llvm::Value* getTupleArg() {
                 return m_function->arg_begin();
             }
 
