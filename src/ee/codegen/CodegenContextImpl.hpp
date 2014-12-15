@@ -15,24 +15,37 @@
  * along with VoltDB.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef _CODEGENCONTEXT_HPP_
-#define _CODEGENCONTEXT_HPP_
+#ifndef _CODEGENCONTEXTIMPL_HPP_
+#define _CODEGENCONTEXTIMPL_HPP_
+
+#include "boost/scoped_ptr.hpp"
+#include "common/types.h"
+
+#include "llvm/IR/IRBuilder.h"
 
 #include <string>
-#include "boost/scoped_ptr.hpp"
 
-#include "common/types.h"
+namespace llvm {
+class ExecutionEngine;
+    namespace legacy {
+class FunctionPassManager;
+    }
+class LLVMContext;
+class Module;
+class Value;
+class Type;
+class IntegerType;
+}
 
 namespace voltdb {
 
     class AbstractExecutor;
     class AbstractExpression;
     class TupleSchema;
-    class CodegenContextImpl;
 
-    class CodegenContext {
+    class CodegenContextImpl {
     public:
-        CodegenContext();
+        CodegenContextImpl();
 
         PredFunction compilePredicate(const std::string& fnName,
                                       const TupleSchema* tupleSchema,
@@ -40,14 +53,28 @@ namespace voltdb {
 
         PlanNodeFunction compilePlanNode(AbstractExecutor* executor);
 
-        ~CodegenContext();
+        llvm::Module* getModule();
+        llvm::LLVMContext& getLlvmContext();
+
+        llvm::Type* getLlvmType(ValueType voltType);
+
+        // returns an llvm integer type that can store an pointer on the jit's target
+        llvm::IntegerType* getIntPtrType();
+
+        ~CodegenContextImpl();
 
         static void shutdownLlvm();
 
     private:
 
-        boost::scoped_ptr<CodegenContextImpl> m_impl;
+        void* generateCode(llvm::Function* fn);
 
+        boost::scoped_ptr<llvm::LLVMContext> m_llvmContext;
+        llvm::Module* m_module;
+        boost::scoped_ptr<llvm::ExecutionEngine> m_executionEngine;
+        boost::scoped_ptr<llvm::legacy::FunctionPassManager> m_passManager;
+
+        std::string m_errorString;
    };
 
 }
