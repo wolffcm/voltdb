@@ -24,7 +24,7 @@
 
 #define VOLT_LOG_LEVEL VOLT_LEVEL_DEBUG
 
-#include "common/CodegenContext.hpp"
+#include "codegen/CodegenContext.hpp"
 #include "common/SQLException.h"
 #include "common/TupleSchema.h"
 #include "common/debuglog.h"

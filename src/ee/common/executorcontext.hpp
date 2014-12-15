@@ -20,7 +20,7 @@
 
 #include "Topend.h"
 #include "common/UndoQuantum.h"
-#include "common/CodegenContext.hpp"
+#include "codegen/CodegenContext.hpp"
 
 namespace voltdb {
 

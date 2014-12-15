@@ -188,8 +188,11 @@ CTX.INPUT['structures'] = """
  ContiguousAllocator.cpp
 """
 
-CTX.INPUT['common'] = """
+CTX.INPUT['codegen'] = """
  CodegenContext.cpp
+"""
+
+CTX.INPUT['common'] = """
  CompactingStringPool.cpp
  CompactingStringStorage.cpp
  FatalException.cpp
