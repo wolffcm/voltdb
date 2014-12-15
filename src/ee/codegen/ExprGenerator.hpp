@@ -24,92 +24,83 @@
 
 namespace voltdb {
 
-class AbstractExpression;
-class OperatorIsNullExpression;
-class ConstantValueExpression;
-class CodegenContextImpl;
-class TupleSchema;
-class TupleValueExpression;
-class ParameterValueExpression;
+    class AbstractExpression;
+    class OperatorIsNullExpression;
+    class ConstantValueExpression;
+    class CodegenContextImpl;
+    class TupleSchema;
+    class TupleValueExpression;
+    class ParameterValueExpression;
 
-namespace {
-class CGValue;
-}
+    namespace {
+        class CGValue;
+    }
 
-class ExprGenerator {
-public:
-ExprGenerator(CodegenContextImpl* codegenContext,
-                  llvm::Function* function,
-                  llvm::IRBuilder<>* builder,
-                  llvm::Value* tupleArg);
+    class ExprGenerator {
+    public:
+        ExprGenerator(CodegenContextImpl* codegenContext,
+                      llvm::Function* function,
+                      llvm::IRBuilder<>* builder,
+                      llvm::Value* tupleArg);
 
-llvm::Value* generate(const TupleSchema* schema, const AbstractExpression* expr);
+        llvm::Value* generate(const TupleSchema* schema, const AbstractExpression* expr);
 
-private:
+    private:
 
-llvm::IRBuilder<>& builder();
+        llvm::IRBuilder<>& builder();
+        llvm::LLVMContext& getLlvmContext();
+        llvm::Type* getLlvmType(ValueType voltType);
+        llvm::Type* getIntPtrType();
+        llvm::Value* getTupleArg();
+        llvm::Value* getTrueValue();
+        llvm::Value* getFalseValue();
+        llvm::Value* compareToNull(llvm::Value* val);
 
-llvm::LLVMContext& getLlvmContext();
-llvm::Type* getLlvmType(ValueType voltType);
+        llvm::BasicBlock* getEmptyBasicBlock(const std::string& label);
 
-llvm::Type* getIntPtrType();
-
-llvm::Value* getTupleArg();
-
-    llvm::Value*
-    getTrueValue();
-
-    llvm::Value*
-    getFalseValue();
-
-    llvm::Value*
-    compareToNull(llvm::Value* val);
-
-    llvm::BasicBlock*
-    getEmptyBasicBlock(const std::string& label);
-
-std::pair<llvm::Value*, llvm::Value*> homogenizeTypes(llvm::Value* lhs, llvm::Value* rhs);
+        std::pair<llvm::Value*, llvm::Value*> homogenizeTypes(llvm::Value* lhs,
+                                                              llvm::Value* rhs);
 
 
-CGValue
-codegenParameterValueExpr(const TupleSchema*,
-                              const ParameterValueExpression* expr);
-CGValue
-codegenTupleValueExpr(const TupleSchema* schema,
-                          const TupleValueExpression* expr);
-llvm::Value*
-codegenCmpOp(ExpressionType exprType,
-                 ValueType outputType,
-                 llvm::Value* lhs,
-                 llvm::Value* rhs);
-CGValue
-codegenConjunctionAndExpr(const TupleSchema* tupleSchema,
+        CGValue
+        codegenParameterValueExpr(const TupleSchema*,
+                                  const ParameterValueExpression* expr);
+        CGValue
+        codegenTupleValueExpr(const TupleSchema* schema,
+                              const TupleValueExpression* expr);
+        llvm::Value*
+        codegenCmpOp(ExpressionType exprType,
+                     ValueType outputType,
+                     llvm::Value* lhs,
+                     llvm::Value* rhs);
+        CGValue
+        codegenConjunctionAndExpr(const TupleSchema* tupleSchema,
+                                  const AbstractExpression* expr);
+
+        CGValue
+        codegenComparisonExpr(const TupleSchema* tupleSchema,
                               const AbstractExpression* expr);
-
-CGValue
-codegenComparisonExpr(const TupleSchema* tupleSchema,
-                                         const AbstractExpression* expr);
-CGValue
-codegenIsNullExpr(const TupleSchema* tupleSchema,
-                      const OperatorIsNullExpression* expr);
+        CGValue
+        codegenIsNullExpr(const TupleSchema* tupleSchema,
+                          const OperatorIsNullExpression* expr);
 
 
-CGValue
-codegenConstantValueExpr(const TupleSchema*,
-                             const ConstantValueExpression* expr);
+        CGValue
+        codegenConstantValueExpr(const TupleSchema*,
+                                 const ConstantValueExpression* expr);
 
-CGValue
-codegenExpr(const TupleSchema* tupleSchema,
-                const AbstractExpression* expr);
+        CGValue
+        codegenExpr(const TupleSchema* tupleSchema,
+                    const AbstractExpression* expr);
 
 
 
-CodegenContextImpl* m_codegenContext;
-llvm::Function* m_function;
-llvm::IRBuilder<>* m_builder;
-llvm::Value* m_tupleArg;
+        CodegenContextImpl* m_codegenContext;
+        llvm::Function* m_function;
+        llvm::IRBuilder<>* m_builder;
+        llvm::Value* m_tupleArg;
 
-};
+    };
 
 }
 
