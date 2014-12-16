@@ -39,28 +39,34 @@ public class Select extends VoltProcedure {
 
     // Checks if the vote is for a valid contestant
     public final SQLStmt selectStmt = new SQLStmt(
-            "SELECT count(*) FROM my_table WHERE i = 100;");
+            "SELECT i, j FROM my_table WHERE i = ?;");
 
     public long run(int value) throws Exception {
-        long numRows = 0;
 
         // Queue up validation statements
         try {
-            voltQueueSQL(selectStmt); //, value);
+            voltQueueSQL(selectStmt, value);
             VoltTable vt = voltExecuteSQL()[0];
-            vt.advanceRow();
-            numRows = vt.getLong(0);
-            if (numRows != 1) {
-                throw new Exception("Unexpected row count: " + numRows);
-            }
-            if (vt.advanceRow() == true) {
-                throw new Exception("Found too many rows!");
-            }
+            assert(vt.advanceRow());
+            boolean hasRow = vt.advanceRow();
+            if (! hasRow)
+                throw new Exception("0 rows?!");
+            long i = vt.getLong(0);
+            long j = vt.getLong(1);
+            if (i != value)
+                throw new Exception("i was " + i + "!");
+            if (j != value)
+                throw new Exception("j was " + j + "!");
+
+            hasRow = vt.advanceRow();
+            if (hasRow)
+                throw new Exception("Too many rows?!");
+
         } catch(Exception ex) {
             System.out.println("Error: " + ex.getMessage());
             throw ex;
         }
 
-        return numRows;
+        return 1;
     }
 }

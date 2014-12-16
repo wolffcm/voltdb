@@ -330,7 +330,7 @@ namespace voltdb { namespace {
                 llvm::Value* storage = builder().CreateConstGEP2_32(tuple, 0, 1);
                 storage = builder().CreateLoad(storage, name);
 
-                assert(storage->getType() == llvm::Type::getInt8PtrTy(ctx));
+                assert(storage->getType() == llvm::Type::getInt8PtrTy(tuple->getContext()));
                 return storage;
             }
 
