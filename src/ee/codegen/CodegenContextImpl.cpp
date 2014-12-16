@@ -188,16 +188,46 @@ extern "C" {
         table->insertTupleNonVirtual(*tuple);
     }
 
-    bool iterator_next(voltdb::TableIterator* iterator, voltdb::TableTuple* tuple) {
-        return iterator->next(*tuple);
+    const voltdb::TupleSchema* table_schema(voltdb::Table* table) {
+        return table->schema();
     }
 
-    char* tuple_address(voltdb::TableTuple* tuple) {
-        return tuple->address();
+    bool iterator_next(voltdb::TableIterator* iterator, voltdb::TableTuple* tuple) {
+        return iterator->next(*tuple);
     }
 }
 
 namespace voltdb { namespace {
+
+        llvm::StructType* tableTupleType(llvm::LLVMContext &ctx) {
+            llvm::Type* ptrToCharTy = llvm::Type::getInt8PtrTy(ctx);
+            return llvm::StructType::get(ptrToCharTy, ptrToCharTy, NULL);
+        }
+
+        // Add the extern "C" functions above to the module
+        void addPrototypes(llvm::Module* module) {
+            llvm::LLVMContext& ctx = module->getContext();
+            llvm::Type* charPtrTy = llvm::Type::getInt8PtrTy(ctx);
+            llvm::Type* boolTy = llvm::Type::getInt8Ty(ctx);
+            llvm::Type* voidTy = llvm::Type::getVoidTy(ctx);
+            llvm::Type* ptrToTupleTy = llvm::PointerType::getUnqual(tableTupleType(ctx));
+
+            module->getOrInsertFunction("table_get_iterator", charPtrTy, charPtrTy, NULL);
+            module->getOrInsertFunction("table_temp_tuple", ptrToTupleTy, charPtrTy, NULL);
+            module->getOrInsertFunction("table_insert_tuple_nonvirtual", voidTy, charPtrTy, ptrToTupleTy, NULL);
+            module->getOrInsertFunction("table_schema", charPtrTy, charPtrTy, NULL);
+
+            module->getOrInsertFunction("iterator_next", boolTy, charPtrTy, ptrToTupleTy, NULL);
+        }
+
+        // Works with llvm::Value and llvm::Type
+        template<typename T>
+        std::string debugLlvm(T* v) {
+            std::string irDump;
+            llvm::raw_string_ostream rso(irDump);
+            v->print(rso);
+            return irDump;
+        }
 
         class PlanNodeFnCtx {
         public:
@@ -287,15 +317,30 @@ namespace voltdb { namespace {
                 return true;
             }
 
-            // A value that points to a TableTuple object.
-            // return a pointer to its backing storage
+            llvm::Function* getExtFn(const std::string& fnName) {
+                VOLT_DEBUG("Getting external function: %s", fnName.c_str());
+                return m_codegenContext->getFunction(fnName);
+            }
+
+            // A value that points to a TableTuple object.  return a
+            // pointer to its backing storage.
             llvm::Value* getTupleStorage(llvm::Value* tuple, const std::string& name) {
-                llvm::Function* tupleAddressFn = m_codegenContext->getFunction("tuple_address");
-                llvm::Value* storage = builder().CreateCall(tupleAddressFn,
-                                                           tuple,
-                                                           name);
+                assert(tuple->getType() == llvm::PointerType::getUnqual(tableTupleType(tuple->getContext())));
+
+                llvm::Value* storage = builder().CreateConstGEP2_32(tuple, 0, 1);
+                storage = builder().CreateLoad(storage, name);
+
+                assert(storage->getType() == llvm::Type::getInt8PtrTy(ctx));
                 return storage;
             }
+
+            // Given a reference to a table tuple, return the address of the
+            // pointer to the schema
+            llvm::Value* getTableTupleSchemaAddress(llvm::Value* tableTuple) {
+                assert(tableTuple->getType() == llvm::PointerType::getUnqual(tableTupleType(tableTuple->getContext())));
+                return builder().CreateConstGEP2_32(tableTuple, 0, 0);
+            }
+
 
             void codegenProjectionInline(ProjectionPlanNode* node,
                                          const TupleSchema* inputSchema,
@@ -323,6 +368,18 @@ namespace voltdb { namespace {
                     builder().CreateStore(v, castedAddr);
                 }
             }
+
+            llvm::Value* codegenSeqScanPredicate(AbstractExpression* pred,
+                                                 const TupleSchema* schema,
+                                                 llvm::Value* tupleStorage) {
+                llvm::LLVMContext &ctx = getLlvmContext();
+                ExprGenerator generator(m_codegenContext, getFunction(), m_builder.get(), tupleStorage);
+                llvm::Value* v = generator.generate(schema, pred);
+                llvm::Value *one = llvm::ConstantInt::get(llvm::Type::getInt8Ty(ctx), 1);
+                llvm::Value* cmpResult = builder().CreateICmpEQ(v, one, "pred_result");
+                return cmpResult;
+            }
+
 
             void codegenSeqScan(SeqScanPlanNode* node) {
                 llvm::LLVMContext &ctx = getLlvmContext();
@@ -358,15 +415,20 @@ namespace voltdb { namespace {
                                                                           "scan_loop_exit",
                                                                           getFunction());
 
-                // The following is wrong; we don't want to overwrite the
-                // input table's temp tuple
-                llvm::Function* tableTempTupleFn = m_codegenContext->getFunction("table_temp_tuple");
-                llvm::Value* inputTuple = builder().CreateCall(tableTempTupleFn,
-                                                              getInputTable(),
-                                                              "input_tuple");
+                // Allocate space for the TableTuple structure on the stack.
+                // We need to pass a reference to the iterator, and we don't
+                // want to overwrite the input table's temp tuple.
+                llvm::Value* inputTuple = builder().CreateAlloca(tableTupleType(ctx));
+                llvm::Value* inputSchema = builder().CreateCall(getExtFn("table_schema"),
+                                                                getInputTable(), "input_schema");
+                // Need to store a pointer to the schema in the tuple, to pass the
+                // iterator's sanity checks.  In general any access to TupleSchema should be
+                // unnecessary at run time, but being expedient for now.
+                builder().CreateStore(inputSchema, getTableTupleSchemaAddress(inputTuple));
                 llvm::Value* outputTuple = inputTuple;
                 llvm::Value* outputTupleStorage = NULL;
                 if (projNode != NULL) {
+                    llvm::Function* tableTempTupleFn = getExtFn("table_temp_tuple");
                     outputTuple = builder().CreateCall(tableTempTupleFn,
                                                        getOutputTable(),
                                                        "output_tuple");
@@ -375,7 +437,7 @@ namespace voltdb { namespace {
                     outputTupleStorage = getTupleStorage(outputTuple, "output_tuple_storage");
 
                 }
-                llvm::Function* getIterFn = m_codegenContext->getFunction("table_get_iterator");
+                llvm::Function* getIterFn = getExtFn("table_get_iterator");
                 llvm::Value* inputIter = builder().CreateCall(getIterFn,
                                                               getInputTable(),
                                                               "input_table_iter");
@@ -383,20 +445,27 @@ namespace voltdb { namespace {
 
                 // The test of the loop condition
                 builder().SetInsertPoint(scanLoopEntry);
-                llvm::Function* iterGetNextFn = m_codegenContext->getFunction("iterator_next");
-                std::vector<llvm::Value*> args;
-                args.push_back(inputIter);
-                args.push_back(inputTuple);
-                llvm::Value* found = builder().CreateCall(iterGetNextFn,
-                                                          args);
+                llvm::Function* iterGetNextFn = getExtFn("iterator_next");
+                llvm::Value* found = builder().CreateCall2(iterGetNextFn,
+                                                           inputIter, inputTuple);
                 llvm::Value *zero = llvm::ConstantInt::get(llvm::Type::getInt8Ty(ctx), 0);
                 llvm::Value* cmpResult = builder().CreateICmpNE(found, zero, "tuple_found");
                 builder().CreateCondBr(cmpResult, scanLoopBody, scanLoopExit);
 
                 // We have an input row.  Process it.
                 builder().SetInsertPoint(scanLoopBody);
+                llvm::Value* inputTupleStorage = getTupleStorage(inputTuple, "input_tuple_storage");
+                if (node->getPredicate()) {
+                    llvm::BasicBlock *predPassed = llvm::BasicBlock::Create(getLlvmContext(),
+                                                                            "pred_passed",
+                                                                            getFunction());
+
+                    llvm::Value* predResult = codegenSeqScanPredicate(node->getPredicate(), inputTable->schema(), inputTupleStorage);
+                    builder().CreateCondBr(predResult, predPassed, scanLoopEntry);
+                    builder().SetInsertPoint(predPassed);
+                }
+
                 if (projNode != NULL) {
-                    llvm::Value* inputTupleStorage = getTupleStorage(inputTuple, "input_tuple_storage");
                     codegenProjectionInline(projNode,
                                             inputTable->schema(),
                                             inputTupleStorage,
@@ -404,11 +473,11 @@ namespace voltdb { namespace {
                                             outputTupleStorage);
                 }
                 llvm::Function* insertTupleFn =
-                    m_codegenContext->getFunction("table_insert_tuple_nonvirtual");
-                args.clear();
-                args.push_back(getOutputTable());
-                args.push_back(outputTuple);
-                builder().CreateCall(insertTupleFn, args);
+                    getExtFn("table_insert_tuple_nonvirtual");
+                // args.clear();
+                // args.push_back(getOutputTable());
+                // args.push_back(outputTuple);
+                builder().CreateCall2(insertTupleFn, getOutputTable(), outputTuple);
                 builder().CreateBr(scanLoopEntry);
 
                 // No more rows.
@@ -429,20 +498,6 @@ namespace voltdb { namespace {
             llvm::Function* m_function;
             boost::scoped_ptr<llvm::IRBuilder<> > m_builder;
         };
-    }
-
-    namespace {
-        void addPrototypes(llvm::Module* module) {
-            llvm::Type* charPtrTy = llvm::Type::getInt8PtrTy(module->getContext());
-            llvm::Type* boolTy = llvm::Type::getInt8Ty(module->getContext());
-            llvm::Type* voidTy = llvm::Type::getVoidTy(module->getContext());
-            module->getOrInsertFunction("table_get_iterator", charPtrTy, charPtrTy, NULL);
-            module->getOrInsertFunction("table_temp_tuple", charPtrTy, charPtrTy, NULL);
-            module->getOrInsertFunction("table_insert_tuple_nonvirtual", voidTy, charPtrTy, charPtrTy, NULL);
-
-            module->getOrInsertFunction("iterator_next", boolTy, charPtrTy, charPtrTy, NULL);
-            module->getOrInsertFunction("tuple_address", charPtrTy, charPtrTy, NULL);
-        }
     }
 
     CodegenContextImpl::CodegenContextImpl()
