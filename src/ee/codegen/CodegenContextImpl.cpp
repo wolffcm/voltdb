@@ -267,26 +267,34 @@ namespace voltdb { namespace {
                 return true;
             }
 
+            // A value that points to a TableTuple object.
+            // return a pointer to its backing storage
+            llvm::Value* getTupleStorage(llvm::Value* tuple, const std::string& name) {
+                llvm::Function* tupleAddressFn = m_codegenContext->getFunction("tuple_address");
+                llvm::Value* storage = builder().CreateCall(tupleAddressFn,
+                                                           tuple,
+                                                           name);
+                return storage;
+            }
+
             void codegenProjectionInline(ProjectionPlanNode* node,
                                          const TupleSchema* inputSchema,
-                                         llvm::Value* inputTuple,
-                                         llvm::Value* outputTuple) {
+                                         llvm::Value* inputTupleStorage,
+                                         const TupleSchema* outputSchema,
+                                         llvm::Value* outputTupleStorage) {
                 const std::vector<AbstractExpression*>& projectedExprs =
                     node->getOutputColumnExpressions();
-
-                llvm::Function* tupleAddressFn = m_codegenContext->getFunction("tuple_address");
-                llvm::Value* inputTupleAddress = builder().CreateCall(tupleAddressFn,
-                                                                      inputTuple,
-                                                                      "input_tuple_address");
 
 
                 for (int i = 0; i < projectedExprs.size(); ++i) {
                     ExprGenerator generator(m_codegenContext,
                                             getFunction(),
-                                            m_builder.get(), inputTupleAddress);
+                                            m_builder.get(), inputTupleStorage);
                     llvm::Value* v = generator.generate(inputSchema, projectedExprs[i]);
+
                     // place the computed expression in the output tuple
-                    (void)v;
+                    // Find the offset of the ith column
+
 
                 }
             }
@@ -310,17 +318,7 @@ namespace voltdb { namespace {
                 Table* inputTable = (node->isSubQuery()) ?
                     node->getChildren()[0]->getOutputTable():
                     node->getTargetTable();
-
-                // Basic structure is like this:
-                //
-                // WHILE we have a tuple in our input table:
-                //   TODO: evaluate project, limit, hash aggregation here
-                //   INSERT it into our output table
-                //
-                // We need the following functions with C linkage:
-                //   get iterator
-                //   get next tuple (return null when no next)
-                //   insert tuple
+                Table* outputTable = node->getOutputTable();
 
                 llvm::BasicBlock *scanLoopEntry = llvm::BasicBlock::Create(getLlvmContext(),
                                                                           "scan_loop_entry",
@@ -337,10 +335,15 @@ namespace voltdb { namespace {
                                                               getInputTable(),
                                                               "input_tuple");
                 llvm::Value* outputTuple = inputTuple;
+                llvm::Value* outputTupleStorage = NULL;
                 if (projNode != NULL) {
                     outputTuple = builder().CreateCall(tableTempTupleFn,
                                                        getOutputTable(),
                                                        "output_tuple");
+
+                    // Get the address of the storage for the output tuple
+                    outputTupleStorage = getTupleStorage(outputTuple, "output_tuple_storage");
+
                 }
                 llvm::Function* getIterFn = m_codegenContext->getFunction("table_get_iterator");
                 llvm::Value* inputIter = builder().CreateCall(getIterFn,
@@ -363,7 +366,12 @@ namespace voltdb { namespace {
                 // We have an input row.  Process it.
                 builder().SetInsertPoint(scanLoopBody);
                 if (projNode != NULL) {
-                    codegenProjectionInline(projNode, inputTable->schema(), inputTuple, outputTuple);
+                    llvm::Value* inputTupleStorage = getTupleStorage(inputTuple, "input_tuple_storage");
+                    codegenProjectionInline(projNode,
+                                            inputTable->schema(),
+                                            inputTupleStorage,
+                                            outputTable->schema(),
+                                            outputTupleStorage);
                 }
                 llvm::Function* insertTupleFn =
                     m_codegenContext->getFunction("table_insert_tuple_nonvirtual");
