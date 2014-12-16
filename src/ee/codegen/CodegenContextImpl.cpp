@@ -36,6 +36,8 @@
 #include "expressions/abstractexpression.h"
 #include "expressions/comparisonexpression.h"
 #include "expressions/operatorexpression.h"
+#include "plannodes/seqscannode.h"
+#include "plannodes/projectionnode.h"
 
 #include "llvm/Analysis/Passes.h"
 #include "llvm/Analysis/Verifier.h"
@@ -148,17 +150,45 @@ namespace voltdb {
             boost::scoped_ptr<llvm::IRBuilder<> > m_builder;
         };
 
+    }}
+
+extern "C" {
+    // These are C wrappers for functions called from
+    // generated code
+
+    voltdb::TableIterator* table_get_iterator(voltdb::Table* table) {
+        return &(table->iteratorDeletingAsWeGo());
+    }
+
+    voltdb::TableTuple* table_temp_tuple(voltdb::Table* table) {
+        return &(table->tempTuple());
+    }
+
+    void table_insert_tuple_nonvirtual(voltdb::TempTable* table, voltdb::TableTuple* tuple) {
+        table->insertTupleNonVirtual(*tuple);
+    }
+
+    bool iterator_next(voltdb::TableIterator* iterator, voltdb::TableTuple* tuple) {
+        return iterator->next(*tuple);
+    }
+
+    char* tuple_address(voltdb::TableTuple* tuple) {
+        return tuple->address();
+    }
+}
+
+namespace voltdb { namespace {
+
         class PlanNodeFnCtx {
         public:
             PlanNodeFnCtx(CodegenContextImpl* codegenContext, AbstractExecutor* executor)
                 : m_codegenContext(codegenContext)
                 , m_function(NULL)
                 , m_builder()
-                , m_node(executor->getPlanNode())
             {
             }
 
-            void init() {
+            void init(AbstractPlanNode *node) {
                 llvm::LLVMContext &ctx = getLlvmContext();
 
                 // Function prototype for a plan node looks like
@@ -169,8 +199,8 @@ namespace voltdb {
                 // represent the tables as void* for now.
 
                 std::ostringstream name;
-                name << planNodeToString(m_node->getPlanNodeType()) << "_"
-                     << m_node->getPlanNodeId() << "_execute";
+                name << planNodeToString(node->getPlanNodeType()) << "_"
+                     << node->getPlanNodeId() << "_execute";
 
                 llvm::Type* ptrTy = llvm::Type::getInt8PtrTy(ctx);
                 std::vector<llvm::Type*> argTypes(2, ptrTy);
@@ -190,10 +220,18 @@ namespace voltdb {
                 m_builder.reset(new llvm::IRBuilder<>(bb));
             }
 
-            void codegen() {
-                llvm::LLVMContext &ctx = getLlvmContext();
-                llvm::Value* retValue = llvm::ConstantInt::get(llvm::Type::getInt8Ty(ctx), 1);
-                builder().CreateRet(retValue);
+            void codegen(AbstractPlanNode *node) {
+                PlanNodeType pnt = node->getPlanNodeType();
+                switch (pnt) {
+                case PLAN_NODE_TYPE_SEQSCAN:
+                    codegenSeqScan(static_cast<SeqScanPlanNode*>(node));
+                    break;
+                default: {
+                    std::ostringstream oss;
+                    oss << "node type " << planNodeToString(pnt);
+                    throw UnsupportedForCodegenException(oss.str());
+                }
+                }
             }
 
             llvm::Function* getFunction() const {
@@ -201,6 +239,145 @@ namespace voltdb {
             }
 
         private:
+            llvm::Value* getInputTable() {
+                return m_function->arg_begin();
+            }
+
+            llvm::Value* getOutputTable() {
+                return ++(m_function->arg_begin());
+            }
+
+            static bool isTrivialScan(SeqScanPlanNode* n) {
+                if (n->getPredicate() != NULL) {
+                    VOLT_DEBUG("Scan is not trivial: has predicate");
+                    return false;
+                }
+
+                if (n->getInlinePlanNodes().size() > 0) {
+                    VOLT_DEBUG("Scan is not trivial: found inlined nodes");
+                    typedef std::map<PlanNodeType, AbstractPlanNode*> InlineMap;
+                    const InlineMap& inlineNodes = n->getInlinePlanNodes();
+                    InlineMap::const_iterator end = inlineNodes.end();
+                    for (InlineMap::const_iterator it = inlineNodes.begin(); it != end; ++it) {
+                        VOLT_DEBUG("  %s", planNodeToString(it->first).c_str());
+                    }
+                    return false;
+                }
+
+                return true;
+            }
+
+            void codegenProjectionInline(ProjectionPlanNode* node,
+                                         const TupleSchema* inputSchema,
+                                         llvm::Value* inputTuple,
+                                         llvm::Value* outputTuple) {
+                const std::vector<AbstractExpression*>& projectedExprs =
+                    node->getOutputColumnExpressions();
+
+                llvm::Function* tupleAddressFn = m_codegenContext->getFunction("tuple_address");
+                llvm::Value* inputTupleAddress = builder().CreateCall(tupleAddressFn,
+                                                                      inputTuple,
+                                                                      "input_tuple_address");
+
+
+                for (int i = 0; i < projectedExprs.size(); ++i) {
+                    ExprGenerator generator(m_codegenContext,
+                                            getFunction(),
+                                            m_builder.get(), inputTupleAddress);
+                    llvm::Value* v = generator.generate(inputSchema, projectedExprs[i]);
+                    // place the computed expression in the output tuple
+                    (void)v;
+
+                }
+            }
+
+            void codegenSeqScan(SeqScanPlanNode* node) {
+                llvm::LLVMContext &ctx = getLlvmContext();
+
+                if (isTrivialScan(node)) {
+                    VOLT_DEBUG("Creating trivial function for scan which does nothing");
+                    llvm::Value* retValue = llvm::ConstantInt::get(llvm::Type::getInt8Ty(ctx), 1);
+                    builder().CreateRet(retValue);
+                    return;
+                }
+
+                ProjectionPlanNode* projNode = static_cast<ProjectionPlanNode*>(node->getInlinePlanNode(PLAN_NODE_TYPE_PROJECTION));
+                int numInlinedNodes = node->getInlinePlanNodes().size();
+                if (numInlinedNodes > 1 || (projNode == NULL && numInlinedNodes > 0)) {
+                    throw UnsupportedForCodegenException("limit or agg inlined in scan");
+                }
+
+                Table* inputTable = (node->isSubQuery()) ?
+                    node->getChildren()[0]->getOutputTable():
+                    node->getTargetTable();
+
+                // Basic structure is like this:
+                //
+                // WHILE we have a tuple in our input table:
+                //   TODO: evaluate project, limit, hash aggregation here
+                //   INSERT it into our output table
+                //
+                // We need the following functions with C linkage:
+                //   get iterator
+                //   get next tuple (return null when no next)
+                //   insert tuple
+
+                llvm::BasicBlock *scanLoopEntry = llvm::BasicBlock::Create(getLlvmContext(),
+                                                                          "scan_loop_entry",
+                                                                          getFunction());
+                llvm::BasicBlock *scanLoopBody = llvm::BasicBlock::Create(getLlvmContext(),
+                                                                          "scan_loop_body",
+                                                                          getFunction());
+                llvm::BasicBlock *scanLoopExit = llvm::BasicBlock::Create(getLlvmContext(),
+                                                                          "scan_loop_exit",
+                                                                          getFunction());
+
+                llvm::Function* tableTempTupleFn = m_codegenContext->getFunction("table_temp_tuple");
+                llvm::Value* inputTuple = builder().CreateCall(tableTempTupleFn,
+                                                              getInputTable(),
+                                                              "input_tuple");
+                llvm::Value* outputTuple = inputTuple;
+                if (projNode != NULL) {
+                    outputTuple = builder().CreateCall(tableTempTupleFn,
+                                                       getOutputTable(),
+                                                       "output_tuple");
+                }
+                llvm::Function* getIterFn = m_codegenContext->getFunction("table_get_iterator");
+                llvm::Value* inputIter = builder().CreateCall(getIterFn,
+                                                              getInputTable(),
+                                                              "input_table_iter");
+                builder().CreateBr(scanLoopEntry);
+
+                // The test of the loop condition
+                builder().SetInsertPoint(scanLoopEntry);
+                llvm::Function* iterGetNextFn = m_codegenContext->getFunction("iterator_next");
+                std::vector<llvm::Value*> args;
+                args.push_back(inputIter);
+                args.push_back(inputTuple);
+                llvm::Value* found = builder().CreateCall(iterGetNextFn,
+                                                          args);
+                llvm::Value *zero = llvm::ConstantInt::get(llvm::Type::getInt8Ty(ctx), 0);
+                llvm::Value* cmpResult = builder().CreateICmpNE(found, zero, "tuple_found");
+                builder().CreateCondBr(cmpResult, scanLoopBody, scanLoopExit);
+
+                // We have an input row.  Process it.
+                builder().SetInsertPoint(scanLoopBody);
+                if (projNode != NULL) {
+                    codegenProjectionInline(projNode, inputTable->schema(), inputTuple, outputTuple);
+                }
+                llvm::Function* insertTupleFn =
+                    m_codegenContext->getFunction("table_insert_tuple_nonvirtual");
+                args.clear();
+                args.push_back(getOutputTable());
+                args.push_back(outputTuple);
+                builder().CreateCall(insertTupleFn, args);
+                builder().CreateBr(scanLoopEntry);
+
+                // No more rows.
+                builder().SetInsertPoint(scanLoopExit);
+                llvm::Value* retValue = llvm::ConstantInt::get(llvm::Type::getInt8Ty(ctx), 1);
+                builder().CreateRet(retValue);
+            }
 
             llvm::LLVMContext& getLlvmContext() {
                 return m_codegenContext->getLlvmContext();
@@ -213,8 +390,21 @@ namespace voltdb {
             CodegenContextImpl* m_codegenContext;
             llvm::Function* m_function;
             boost::scoped_ptr<llvm::IRBuilder<> > m_builder;
-            AbstractPlanNode *m_node;
         };
+    }
+
+    namespace {
+        void addPrototypes(llvm::Module* module) {
+            llvm::Type* charPtrTy = llvm::Type::getInt8PtrTy(module->getContext());
+            llvm::Type* boolTy = llvm::Type::getInt8Ty(module->getContext());
+            llvm::Type* voidTy = llvm::Type::getVoidTy(module->getContext());
+            module->getOrInsertFunction("table_get_iterator", charPtrTy, charPtrTy, NULL);
+            module->getOrInsertFunction("table_temp_tuple", charPtrTy, charPtrTy, NULL);
+            module->getOrInsertFunction("table_insert_tuple_nonvirtual", voidTy, charPtrTy, charPtrTy, NULL);
+
+            module->getOrInsertFunction("iterator_next", boolTy, charPtrTy, charPtrTy, NULL);
+            module->getOrInsertFunction("tuple_address", charPtrTy, charPtrTy, NULL);
+        }
     }
 
     CodegenContextImpl::CodegenContextImpl()
@@ -231,7 +421,10 @@ namespace voltdb {
 
         m_module = new llvm::Module("voltdb_generated_code", *m_llvmContext);
 
-        llvm::ExecutionEngine *engine = llvm::EngineBuilder(m_module).setErrorStr(&m_errorString).create();
+        llvm::ExecutionEngine *engine = llvm::EngineBuilder(m_module)
+            .setErrorStr(&m_errorString)
+            //            .setUseMCJIT(true)
+            .create();
 
         if (! engine) {
             // throwing in a constructor is bad
@@ -243,6 +436,8 @@ namespace voltdb {
         // m_module now owned by the engine.
 
         m_executionEngine.reset(engine);
+
+        addPrototypes(m_module);
 
         m_passManager.reset(new llvm::FunctionPassManager(m_module));
 
@@ -273,6 +468,13 @@ namespace voltdb {
     llvm::Module*
     CodegenContextImpl::getModule() {
         return m_module;
+    }
+
+    llvm::Function*
+    CodegenContextImpl::getFunction(const std::string& fnName) {
+        llvm::Function* fn = m_module->getFunction(fnName);
+        assert(fn != NULL);
+        return fn;
     }
 
     llvm::Type*
@@ -369,14 +571,15 @@ namespace voltdb {
 
     PlanNodeFunction
     CodegenContextImpl::compilePlanNode(AbstractExecutor *executor) {
-        VOLT_DEBUG("Attempting to compile plan node:\n%s", executor->getPlanNode()->debug().c_str());
+        AbstractPlanNode *node = executor->getPlanNode();
+        VOLT_DEBUG("Attempting to compile plan node:\n%s", node->debug().c_str());
         PlanNodeFnCtx planNodeFnCtx(this, executor);
-        planNodeFnCtx.init();
+        planNodeFnCtx.init(node);
         boost::timer t;
 
         try {
             t.restart();
-            planNodeFnCtx.codegen();
+            planNodeFnCtx.codegen(node);
             VOLT_DEBUG("Plan node IR construction took %f seconds", t.elapsed());
         }
         catch (UnsupportedForCodegenException& ex) {

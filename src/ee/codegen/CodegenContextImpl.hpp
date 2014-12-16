@@ -62,6 +62,8 @@ namespace voltdb {
         // returns an llvm integer type that can store a pointer on the jit's target
         llvm::IntegerType* getIntPtrType();
 
+        llvm::Function* getFunction(const std::string& fnName);
+
         ~CodegenContextImpl();
 
         static void shutdownLlvm();
