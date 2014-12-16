@@ -62,6 +62,8 @@ namespace voltdb {
         // returns an llvm integer type that can store a pointer on the jit's target
         llvm::IntegerType* getIntPtrType();
 
+        llvm::Value* getColumnOffset(const TupleSchema* schema, int columnId);
+
         llvm::Function* getFunction(const std::string& fnName);
 
         ~CodegenContextImpl();
@@ -98,6 +100,12 @@ namespace voltdb {
     private:
         const std::string m_message;
     };
+
+    // This should not really be necessary, but sometimes the NValue
+    // produced by an expression's eval() method does not match the
+    // ValueType produced by calling expr->getValueType().  This
+    // function is provided to work around this.
+    ValueType getExprType(const AbstractExpression* expr);
 }
 
 #endif

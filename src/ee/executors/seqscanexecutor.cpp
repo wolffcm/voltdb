@@ -74,21 +74,6 @@ bool SeqScanExecutor::p_init(AbstractPlanNode* abstract_node,
     assert(isSubquery || node->getTargetTable());
     assert((! isSubquery) || (node->getChildren().size() == 1));
 
-    m_planNodeFunction = compilePlanNode(this);
-
-    if (! m_planNodeFunction) {
-        // If we couldn't generate code for the plan node, maybe we
-        // could at least generate code for the predicate
-        if (node->getPredicate()) {
-            Table* input_table = (node->isSubQuery()) ?
-                node->getChildren()[0]->getOutputTable():
-                node->getTargetTable();
-            m_predFunction = compilePredicate("seq_scan_pred",
-                                              input_table->schema(),
-                                              node->getPredicate());
-        }
-    }
-
     //
     // OPTIMIZATION: If there is no predicate for this SeqScan,
     // then we want to just set our OutputTable pointer to be the
@@ -117,6 +102,21 @@ bool SeqScanExecutor::p_init(AbstractPlanNode* abstract_node,
 
     // Inline aggregation can be serial, partial or hash
     m_aggExec = voltdb::getInlineAggregateExecutor(node);
+
+    m_planNodeFunction = compilePlanNode(this);
+
+    if (! m_planNodeFunction) {
+        // If we couldn't generate code for the plan node, maybe we
+        // could at least generate code for the predicate
+        if (node->getPredicate()) {
+            Table* input_table = (node->isSubQuery()) ?
+                node->getChildren()[0]->getOutputTable():
+                node->getTargetTable();
+            m_predFunction = compilePredicate("seq_scan_pred",
+                                              input_table->schema(),
+                                              node->getPredicate());
+        }
+    }
 
     return true;
 }

@@ -65,6 +65,26 @@ static void initializeNativeTarget() {
 
 namespace voltdb {
 
+    ValueType getExprType(const AbstractExpression* expr) {
+            switch (expr->getExpressionType()) {
+            case EXPRESSION_TYPE_COMPARE_EQUAL:
+            case EXPRESSION_TYPE_COMPARE_NOTEQUAL:
+            case EXPRESSION_TYPE_COMPARE_LESSTHAN:
+            case EXPRESSION_TYPE_COMPARE_GREATERTHAN:
+            case EXPRESSION_TYPE_COMPARE_LESSTHANOREQUALTO:
+            case EXPRESSION_TYPE_COMPARE_GREATERTHANOREQUALTO:
+            case EXPRESSION_TYPE_COMPARE_LIKE:
+            case EXPRESSION_TYPE_COMPARE_IN:
+            case EXPRESSION_TYPE_CONJUNCTION_AND:
+            case EXPRESSION_TYPE_CONJUNCTION_OR:
+                return VALUE_TYPE_BOOLEAN;
+            default:
+                return expr->getValueType();
+            }
+        }
+
+
+
     namespace {
 
         // maintains the current state of the LLVM function being generated
@@ -287,15 +307,20 @@ namespace voltdb { namespace {
 
 
                 for (int i = 0; i < projectedExprs.size(); ++i) {
+                    AbstractExpression* expr = projectedExprs[i];
                     ExprGenerator generator(m_codegenContext,
                                             getFunction(),
                                             m_builder.get(), inputTupleStorage);
-                    llvm::Value* v = generator.generate(inputSchema, projectedExprs[i]);
+                    llvm::Value* v = generator.generate(inputSchema, expr);
 
                     // place the computed expression in the output tuple
                     // Find the offset of the ith column
-
-
+                    llvm::Value* offset = m_codegenContext->getColumnOffset(outputSchema, i);
+                    llvm::Value* address = builder().CreateGEP(outputTupleStorage, offset);
+                    llvm::Type* elemTy = m_codegenContext->getLlvmType(getExprType(expr));
+                    llvm::Type* ptrTy = llvm::PointerType::getUnqual(elemTy);
+                    llvm::Value* castedAddr = builder().CreateBitCast(address, ptrTy);
+                    builder().CreateStore(v, castedAddr);
                 }
             }
 
@@ -320,6 +345,9 @@ namespace voltdb { namespace {
                     node->getTargetTable();
                 Table* outputTable = node->getOutputTable();
 
+                assert(inputTable != NULL);
+                assert(outputTable != NULL);
+
                 llvm::BasicBlock *scanLoopEntry = llvm::BasicBlock::Create(getLlvmContext(),
                                                                           "scan_loop_entry",
                                                                           getFunction());
@@ -330,6 +358,8 @@ namespace voltdb { namespace {
                                                                           "scan_loop_exit",
                                                                           getFunction());
 
+                // The following is wrong; we don't want to overwrite the
+                // input table's temp tuple
                 llvm::Function* tableTempTupleFn = m_codegenContext->getFunction("table_temp_tuple");
                 llvm::Value* inputTuple = builder().CreateCall(tableTempTupleFn,
                                                               getInputTable(),
@@ -522,6 +552,13 @@ namespace voltdb { namespace {
 #else
         (void)module;
 #endif
+    }
+
+    llvm::Value* CodegenContextImpl::getColumnOffset(const TupleSchema* schema, int columnId) {
+        const TupleSchema::ColumnInfo *columnInfo = schema->getColumnInfo(columnId);
+        uint32_t intOffset = TUPLE_HEADER_SIZE + columnInfo->offset;
+        llvm::Value* offset = llvm::ConstantInt::get(getLlvmType(VALUE_TYPE_INTEGER), intOffset);
+        return offset;
     }
 
     void*

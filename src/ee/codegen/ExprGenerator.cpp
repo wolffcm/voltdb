@@ -50,29 +50,6 @@ namespace voltdb {
             bool m_mayBeNull;
         };
 
-        // This should not really be necessary, but sometimes the
-        // NValue produced by an expression's eval() method does not
-        // match the ValueType produced by calling
-        // expr->getValueType().  This function is provided to work
-        // around this.
-        ValueType getExprType(const AbstractExpression* expr) {
-            switch (expr->getExpressionType()) {
-            case EXPRESSION_TYPE_COMPARE_EQUAL:
-            case EXPRESSION_TYPE_COMPARE_NOTEQUAL:
-            case EXPRESSION_TYPE_COMPARE_LESSTHAN:
-            case EXPRESSION_TYPE_COMPARE_GREATERTHAN:
-            case EXPRESSION_TYPE_COMPARE_LESSTHANOREQUALTO:
-            case EXPRESSION_TYPE_COMPARE_GREATERTHANOREQUALTO:
-            case EXPRESSION_TYPE_COMPARE_LIKE:
-            case EXPRESSION_TYPE_COMPARE_IN:
-            case EXPRESSION_TYPE_CONJUNCTION_AND:
-            case EXPRESSION_TYPE_CONJUNCTION_OR:
-                return VALUE_TYPE_BOOLEAN;
-            default:
-                return expr->getValueType();
-            }
-        }
-
         llvm::Value* getNullValueForType(llvm::Type* ty) {
             if (!ty->isIntegerTy()) {
                 throw UnsupportedForCodegenException("attempt to get null value for non-integer type");
