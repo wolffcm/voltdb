@@ -63,9 +63,6 @@ namespace voltdb {
         // the jit's target
         llvm::IntegerType* getIntPtrType();
 
-        // returns size_t as an llvm::Type
-        static llvm::IntegerType* getNativeSizeType(llvm::LLVMContext& ctx);
-
         llvm::Value* getColumnOffset(const TupleSchema* schema, int columnId);
 
         llvm::Function* getFunction(const std::string& fnName);

@@ -95,6 +95,9 @@ namespace voltdb {
             return m_cgVoltType.isInlinedVarchar();
         }
 
+        llvm::Value* getVarcharDataLength(llvm::IRBuilder<>& builder) const;
+        llvm::Value* getVarcharTotalLength(llvm::IRBuilder<>& builder) const;
+
     private:
         llvm::Value* m_value;
         bool m_mayBeNull;

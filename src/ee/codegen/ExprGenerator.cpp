@@ -49,7 +49,40 @@ namespace voltdb {
                 return llvm::ConstantInt::get(intTy, INT64_NULL);
             }
         }
+
+        llvm::Value*
+        getVarcharLength(llvm::IRBuilder<>& builder, const CGValue& vcVal) {
+            assert(vcVal.isInlinedVarchar());
+
+            // load the first byte
+            llvm::Value* fb = builder.CreateLoad(vcVal.val());
+            const char mask = ~static_cast<char>(OBJECT_NULL_BIT | OBJECT_CONTINUATION_BIT);
+            llvm::Value* len = builder.CreateAnd(fb, mask);
+            len = builder.CreateZExtOrBitCast(len, getNativeSizeType(len->getContext()));
+            return len;
+        }
+
+        llvm::Value* getVarcharData(llvm::IRBuilder<>& builder, const CGValue& vcVal) {
+            assert(vcVal.isInlinedVarchar());
+            return builder.CreateConstGEP1_32(vcVal.val(), 1);
+        }
     }
+
+    llvm::Value* CGValue::getVarcharDataLength(llvm::IRBuilder<>& builder) const {
+        assert(isInlinedVarchar());
+        return getVarcharLength(builder, *this);
+
+    }
+
+    llvm::Value* CGValue::getVarcharTotalLength(llvm::IRBuilder<>& builder) const {
+        assert(isInlinedVarchar());
+        llvm::Value* dataLen = getVarcharDataLength(builder);
+        llvm::Value* shortLengthLength = llvm::ConstantInt::get(getNativeSizeType(dataLen->getContext()),
+                                                                SHORT_OBJECT_LENGTHLENGTH);
+        llvm::Value* totalLen = builder.CreateAdd(dataLen, shortLengthLength);
+        return totalLen;
+    }
+
 
     ExprGenerator::ExprGenerator(CodegenContextImpl* codegenContext,
                                  llvm::Function* function,
@@ -65,10 +98,6 @@ namespace voltdb {
     llvm::IRBuilder<>& ExprGenerator::builder() {
         return *m_builder;
     }
-
-    // llvm::Type* ExprGenerator::getLlvmType(ValueType voltType) {
-    //     return m_codegenContext->getLlvmType(voltType);
-    // }
 
     llvm::Type* ExprGenerator::getLlvmType(const CGVoltType& cgVoltType) {
         if (cgVoltType.ty() == VALUE_TYPE_VARCHAR && cgVoltType.isInlined()) {
@@ -149,27 +178,6 @@ namespace voltdb {
         //VOLT_DEBUG("Getting external function: %s", fnName.c_str());
         return m_codegenContext->getFunction(fnName);
     }
-
-    namespace {
-        llvm::Value*
-        getVarcharLength(llvm::IRBuilder<>& builder, const CGValue& vcVal) {
-            assert(vcVal.isInlinedVarchar());
-
-            // load the first byte
-            llvm::Value* fb = builder.CreateLoad(vcVal.val());
-            const char mask = ~static_cast<char>(OBJECT_NULL_BIT | OBJECT_CONTINUATION_BIT);
-            llvm::Value* len = builder.CreateAnd(fb, mask);
-            return len;
-        }
-
-        llvm::Value* getVarcharData(llvm::IRBuilder<>& builder, const CGValue& vcVal) {
-            assert(vcVal.isInlinedVarchar());
-            return builder.CreateConstGEP1_32(vcVal.val(), 1);
-        }
-
-    }
-
-
 
     llvm::Value*
     ExprGenerator::codegenCmpVarchar(ExpressionType exprType,

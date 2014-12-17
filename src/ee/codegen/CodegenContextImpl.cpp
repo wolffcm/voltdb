@@ -233,6 +233,10 @@ namespace voltdb { namespace {
             module->getOrInsertFunction("strncmp", nativeIntTy,
                                         charPtrTy, charPtrTy, nativeSizeTy, NULL);
 
+            // Also need memcpy to insert into varchar fields into tuples
+            //   void *memcpy(void *restrict dst, const void *restrict src, size_t n);
+            module->getOrInsertFunction("memcpy",  charPtrTy,
+                                        charPtrTy, charPtrTy, nativeSizeTy, NULL);
         }
 
         // Works with llvm::Value and llvm::Type
@@ -353,7 +357,22 @@ namespace voltdb { namespace {
             }
 
 
-            //void storeInTuple(llvm::Value* address,
+            void storeInTuple(llvm::Value* addressInTupleStorage, const CGValue& cgVal) {
+                if (cgVal.isInlinedVarchar()) {
+                    // Use memcpy
+                    llvm::Function* memcpyFn = getExtFn("memcpy");
+                    builder().CreateCall3(memcpyFn,
+                                          addressInTupleStorage,
+                                          cgVal.val(),
+                                          cgVal.getVarcharTotalLength(builder()));
+                }
+                else {
+                    llvm::Type* elemTy = m_codegenContext->getLlvmType(cgVal.ty());
+                    llvm::Type* ptrTy = llvm::PointerType::getUnqual(elemTy);
+                    llvm::Value* castedAddr = builder().CreateBitCast(addressInTupleStorage, ptrTy);
+                    builder().CreateStore(cgVal.val(), castedAddr);
+                }
+            }
 
 
             void codegenProjectionInline(ProjectionPlanNode* node,
@@ -370,16 +389,14 @@ namespace voltdb { namespace {
                     ExprGenerator generator(m_codegenContext,
                                             getFunction(),
                                             m_builder.get(), inputTupleStorage);
-                    llvm::Value* v = generator.codegenExpr(inputSchema, expr).val();
+                    CGValue cgv = generator.codegenExpr(inputSchema, expr);
 
                     // place the computed expression in the output tuple
                     // Find the offset of the ith column
                     llvm::Value* offset = m_codegenContext->getColumnOffset(outputSchema, i);
                     llvm::Value* address = builder().CreateGEP(outputTupleStorage, offset);
-                    llvm::Type* elemTy = m_codegenContext->getLlvmType(getExprType(expr));
-                    llvm::Type* ptrTy = llvm::PointerType::getUnqual(elemTy);
-                    llvm::Value* castedAddr = builder().CreateBitCast(address, ptrTy);
-                    builder().CreateStore(v, castedAddr);
+                    storeInTuple(address, cgv);
+
                 }
             }
 
