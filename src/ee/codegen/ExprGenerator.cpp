@@ -17,6 +17,8 @@
 
 #include "ExprGenerator.hpp"
 
+#include "llvm/IR/Function.h"
+
 #include "codegen/CodegenContextImpl.hpp"
 #include "common/ValuePeeker.hpp"
 #include "expressions/abstractexpression.h"
@@ -218,11 +220,100 @@ namespace voltdb {
                        columnInfo->allowNull, cgVoltType);
     }
 
+    llvm::Function* ExprGenerator::getExtFn(const std::string& fnName) {
+        //VOLT_DEBUG("Getting external function: %s", fnName.c_str());
+        return m_codegenContext->getFunction(fnName);
+    }
+
+    namespace {
+        llvm::Value*
+        getVarcharLength(llvm::IRBuilder<>& builder, const CGValue& vcVal) {
+            assert(vcVal.isInlinedVarchar());
+
+            // load the first byte
+            llvm::Value* fb = builder.CreateLoad(vcVal.val());
+            const char mask = ~static_cast<char>(OBJECT_NULL_BIT | OBJECT_CONTINUATION_BIT);
+            llvm::Value* len = builder.CreateAnd(fb, mask);
+            return len;
+        }
+
+        llvm::Value* getVarcharData(llvm::IRBuilder<>& builder, const CGValue& vcVal) {
+            assert(vcVal.isInlinedVarchar());
+            return builder.CreateConstGEP1_32(vcVal.val(), 1);
+        }
+
+    }
+
+
+
     llvm::Value*
     ExprGenerator::codegenCmpVarchar(ExpressionType exprType,
                                      const CGValue& lhs,
                                      const CGValue& rhs) {
-        return NULL; // xxx
+        llvm::LLVMContext& ctx = lhs.val()->getContext();
+        llvm::Value* lhsLen = getVarcharLength(builder(), lhs);
+        llvm::Value* rhsLen = getVarcharLength(builder(), rhs);
+        lhsLen->setName("vc_lhs_len");
+        rhsLen->setName("vc_rhs_len");
+
+        llvm::Value* lenDiff = builder().CreateSub(lhsLen, rhsLen, "len_diff");
+        llvm::Value* lhsShorter = builder().CreateICmpSLT(lenDiff,
+                                                          getZeroValue(lenDiff->getType()),
+                                                          "lhs_shorter");
+        llvm::Value* shorterLen = builder().CreateSelect(lhsShorter, lhsLen, rhsLen);
+        shorterLen = builder().CreateZExtOrBitCast(shorterLen,
+                                                   getNativeSizeType(ctx),
+                                                   "min_len");
+        // now call strncmp(lhs, rhs, shorterLen);
+        llvm::Value* lhsData = getVarcharData(builder(), lhs);
+        llvm::Value* rhsData = getVarcharData(builder(), rhs);
+        llvm::Value* cmpResult = builder().CreateCall3(getExtFn("strncmp"),
+                                                       lhsData,
+                                                       rhsData,
+                                                       shorterLen,
+                                                       "strncmp_result");
+        llvm::Value* zero = getZeroValue(cmpResult->getType());
+        llvm::Value* cmpResultIsZero = builder().CreateICmpEQ(cmpResult,
+                                                              zero,
+                                                              "strncmp_result_zero");
+        // If cmpResult (strcmp's output) is zero, then the result of the comparison
+        // is the length difference.
+        lenDiff = builder().CreateZExtOrBitCast(lenDiff, cmpResult->getType());
+        llvm::Value* result = builder().CreateSelect(cmpResultIsZero,
+                                                     lenDiff,
+                                                     cmpResult);
+
+        // Now translate to true or false, based on the exprType
+        llvm::Value* answer;
+        switch (exprType) {
+        case EXPRESSION_TYPE_COMPARE_EQUAL:
+            answer =  builder().CreateICmpEQ(result, zero);
+            break;
+        case EXPRESSION_TYPE_COMPARE_NOTEQUAL:
+            answer =  builder().CreateICmpNE(result, zero);
+            break;
+        case EXPRESSION_TYPE_COMPARE_LESSTHAN:
+            answer =  builder().CreateICmpSLT(result, zero);
+            break;
+        case EXPRESSION_TYPE_COMPARE_GREATERTHAN:
+            answer =  builder().CreateICmpSGT(result, zero);
+            break;
+        case EXPRESSION_TYPE_COMPARE_LESSTHANOREQUALTO:
+            answer =  builder().CreateICmpSLE(result, zero);
+            break;
+        case EXPRESSION_TYPE_COMPARE_GREATERTHANOREQUALTO:
+            answer =  builder().CreateICmpSGE(result, zero);
+            break;
+        default: {
+            std::string msg = "varchar compare with op ";
+            msg += expressionToString(exprType);
+            throw UnsupportedForCodegenException(msg);
+        }
+        }
+
+        // Widen the i1 to i8
+        answer = builder().CreateZExtOrBitCast(answer, llvm::Type::getInt8Ty(ctx), "vc_cmp_result");
+        return answer;
     }
 
     llvm::Value*
@@ -236,6 +327,7 @@ namespace voltdb {
             // find the shorter string.
             // invoke strncmp(lhs, rhs, shorterLen)
             // return comparison with return code
+            return codegenCmpVarchar(exprType, lhs, rhs);
         }
 
         llvm::Value* lhsv = lhs.val();
@@ -280,6 +372,12 @@ namespace voltdb {
         return llvm::ConstantInt::get(getLlvmType(VALUE_TYPE_BOOLEAN), 0);
     }
 
+    llvm::Value*
+    ExprGenerator::getZeroValue(llvm::Type* ty) {
+        llvm::IntegerType* intTy = llvm::dyn_cast<llvm::IntegerType>(ty);
+        return llvm::ConstantInt::get(intTy, 0);
+    }
+
     // return an i1 that will be 1 if the expression is null.
     llvm::Value*
     ExprGenerator::compareToNull(const CGValue& cgVal) {
@@ -296,8 +394,9 @@ namespace voltdb {
     }
 
     llvm::BasicBlock*
-    ExprGenerator::getEmptyBasicBlock(const std::string& label) {
-        return llvm::BasicBlock::Create(getLlvmContext(), label, m_function);
+    ExprGenerator::getEmptyBasicBlock(const std::string& label,
+                                      llvm::BasicBlock* insertBefore) {
+        return llvm::BasicBlock::Create(getLlvmContext(), label, m_function, insertBefore);
     }
 
     typedef std::pair<llvm::Value*, llvm::BasicBlock*> ValueBB;
@@ -330,11 +429,12 @@ namespace voltdb {
         //   return phi(answer)
 
         std::vector<ValueBB> results;
-        llvm::BasicBlock* resultBlock = getEmptyBasicBlock("and_result");
+        llvm::BasicBlock* resultBlock = getEmptyBasicBlock("and_result", NULL);
+        resultBlock->moveAfter(builder().GetInsertBlock());
         CGValue left = codegenExpr(tupleSchema,
                                    expr->getLeft());
-        llvm::BasicBlock *lhsFalseLabel = getEmptyBasicBlock("and_lhs_false");
-        llvm::BasicBlock *lhsNotFalseLabel = getEmptyBasicBlock("and_lhs_not_false");
+        llvm::BasicBlock *lhsFalseLabel = getEmptyBasicBlock("and_lhs_false", resultBlock);
+        llvm::BasicBlock *lhsNotFalseLabel = getEmptyBasicBlock("and_lhs_not_false", resultBlock);
         llvm::Value* lhsFalseCmp = builder().CreateICmpEQ(left.val(), getFalseValue());
         builder().CreateCondBr(lhsFalseCmp, lhsFalseLabel, lhsNotFalseLabel);
 
@@ -352,8 +452,8 @@ namespace voltdb {
             builder().CreateBr(resultBlock);
         }
         else {
-            llvm::BasicBlock *lhsTrueLabel = getEmptyBasicBlock("and_lhs_true");
-            llvm::BasicBlock *lhsNullLabel = getEmptyBasicBlock("and_lhs_null");
+            llvm::BasicBlock *lhsTrueLabel = getEmptyBasicBlock("and_lhs_true", resultBlock);
+            llvm::BasicBlock *lhsNullLabel = getEmptyBasicBlock("and_lhs_null", resultBlock);
             llvm::Value* lhsTrueCmp = builder().CreateICmpEQ(left.val(), getTrueValue());
             builder().CreateCondBr(lhsTrueCmp, lhsTrueLabel, lhsNullLabel);
 
@@ -365,8 +465,8 @@ namespace voltdb {
             // lhs is null
 
             builder().SetInsertPoint(lhsNullLabel);
-            llvm::BasicBlock *rhsFalseLabel = getEmptyBasicBlock("and_rhs_false");
-            llvm::BasicBlock *rhsNotFalseLabel = getEmptyBasicBlock("and_rhs_not_false");
+            llvm::BasicBlock *rhsFalseLabel = getEmptyBasicBlock("and_rhs_false", resultBlock);
+            llvm::BasicBlock *rhsNotFalseLabel = getEmptyBasicBlock("and_rhs_not_false", resultBlock);
             llvm::Value* rhsFalseCmp = builder().CreateICmpEQ(right.val(), getFalseValue());
             builder().CreateCondBr(rhsFalseCmp, rhsFalseLabel, rhsNotFalseLabel);
 
@@ -382,7 +482,6 @@ namespace voltdb {
             builder().CreateBr(resultBlock);
         }
 
-        resultBlock->moveAfter(builder().GetInsertBlock());
         builder().SetInsertPoint(resultBlock);
 
         llvm::PHINode* phi = builder().CreatePHI(getLlvmType(getExprType(expr)), 3);
@@ -433,12 +532,14 @@ namespace voltdb {
                                          const AbstractExpression* expr) {
 
         std::vector<ValueBB> results;
-        llvm::BasicBlock* resultBlock = getEmptyBasicBlock("cmp_result");
+        llvm::BasicBlock* resultBlock = getEmptyBasicBlock("cmp_result", NULL);
+        resultBlock->moveAfter(builder().GetInsertBlock());
         CGValue left = codegenExpr(tupleSchema,
                                    expr->getLeft());
         if (left.mayBeNull()) { // value produced on LHS may be null
-            llvm::BasicBlock* lhsIsNull = getEmptyBasicBlock("cmp_lhs_null");
-            llvm::BasicBlock* lhsNotNull = getEmptyBasicBlock("cmp_lhs_not_null");
+            llvm::BasicBlock* lhsIsNull = getEmptyBasicBlock("cmp_lhs_null", resultBlock);
+            llvm::BasicBlock* lhsNotNull = getEmptyBasicBlock("cmp_lhs_not_null", resultBlock);
+
             llvm::Value* cmp = compareToNull(left);
             builder().CreateCondBr(cmp, lhsIsNull, lhsNotNull);
 
@@ -453,8 +554,8 @@ namespace voltdb {
         CGValue right = codegenExpr(tupleSchema,
                                     expr->getRight());
         if (right.mayBeNull()) { // value produced on RHS may be null
-            llvm::BasicBlock* rhsIsNull = getEmptyBasicBlock("cmp_rhs_null");
-            llvm::BasicBlock* rhsNotNull = getEmptyBasicBlock("cmp_rhs_not_null");
+            llvm::BasicBlock* rhsIsNull = getEmptyBasicBlock("cmp_rhs_null", resultBlock);
+            llvm::BasicBlock* rhsNotNull = getEmptyBasicBlock("cmp_rhs_not_null", resultBlock);
             llvm::Value* cmp = compareToNull(right);
             builder().CreateCondBr(cmp, rhsIsNull, rhsNotNull);
 
@@ -476,7 +577,6 @@ namespace voltdb {
         results.push_back(std::make_pair(cmp, builder().GetInsertBlock()));
         builder().CreateBr(resultBlock);
 
-        resultBlock->moveAfter(builder().GetInsertBlock());
         builder().SetInsertPoint(resultBlock);
         llvm::PHINode* phi = builder().CreatePHI(getLlvmType(getExprType(expr)), 3);
 

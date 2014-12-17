@@ -56,12 +56,14 @@ namespace voltdb {
         llvm::Value* getTupleArg();
         llvm::Value* getTrueValue();
         llvm::Value* getFalseValue();
+        llvm::Value* getZeroValue(llvm::Type* ty);
         llvm::Value* compareToNull(const CGValue& cgVal);
 
-        llvm::BasicBlock* getEmptyBasicBlock(const std::string& label);
+        llvm::BasicBlock* getEmptyBasicBlock(const std::string& label,
+                                             llvm::BasicBlock* insertBefore);
 
         std::pair<CGValue, CGValue> homogenizeTypes(const CGValue& lhs,
-                                                              const CGValue& rhs);
+                                                    const CGValue& rhs);
 
 
         CGValue
@@ -102,6 +104,7 @@ namespace voltdb {
         codegenExpr(const TupleSchema* tupleSchema,
                     const AbstractExpression* expr);
 
+        llvm::Function* getExtFn(const std::string& fnName);
 
 
         CodegenContextImpl* m_codegenContext;

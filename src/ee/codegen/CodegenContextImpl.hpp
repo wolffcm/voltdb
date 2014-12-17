@@ -59,8 +59,12 @@ namespace voltdb {
 
         llvm::Type* getLlvmType(ValueType voltType);
 
-        // returns an llvm integer type that can store a pointer on the jit's target
+        // returns an llvm integer type that can store a pointer on
+        // the jit's target
         llvm::IntegerType* getIntPtrType();
+
+        // returns size_t as an llvm::Type
+        static llvm::IntegerType* getNativeSizeType(llvm::LLVMContext& ctx);
 
         llvm::Value* getColumnOffset(const TupleSchema* schema, int columnId);
 
@@ -106,6 +110,8 @@ namespace voltdb {
     // ValueType produced by calling expr->getValueType().  This
     // function is provided to work around this.
     ValueType getExprType(const AbstractExpression* expr);
+
+    llvm::IntegerType* getNativeSizeType(llvm::LLVMContext& ctx);
 }
 
 #endif

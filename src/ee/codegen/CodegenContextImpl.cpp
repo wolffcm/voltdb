@@ -65,6 +65,12 @@ static void initializeNativeTarget() {
 
 namespace voltdb {
 
+    llvm::IntegerType* getNativeSizeType(llvm::LLVMContext& ctx) {
+        static const unsigned sizeSizeInBits = static_cast<unsigned>(sizeof(size_t) * 8);
+        llvm::IntegerType* nativeSizeTy = llvm::Type::getIntNTy(ctx, sizeSizeInBits);
+        return nativeSizeTy;
+    }
+
     ValueType getExprType(const AbstractExpression* expr) {
             switch (expr->getExpressionType()) {
             case EXPRESSION_TYPE_COMPARE_EQUAL:
@@ -218,6 +224,15 @@ namespace voltdb { namespace {
             module->getOrInsertFunction("table_schema", charPtrTy, charPtrTy, NULL);
 
             module->getOrInsertFunction("iterator_next", boolTy, charPtrTy, ptrToTupleTy, NULL);
+
+            // Man page defines strncmp like this
+            //   int strncmp(const char *s1, const char *s2, size_t n);
+            static const unsigned intSizeInBits = static_cast<unsigned>(sizeof(int) * 8);
+            llvm::Type* nativeIntTy = llvm::Type::getIntNTy(ctx, intSizeInBits);
+            llvm::Type* nativeSizeTy = getNativeSizeType(ctx);
+            module->getOrInsertFunction("strncmp", nativeIntTy,
+                                        charPtrTy, charPtrTy, nativeSizeTy, NULL);
+
         }
 
         // Works with llvm::Value and llvm::Type
@@ -310,6 +325,9 @@ namespace voltdb { namespace {
                 return true;
             }
 
+            static llvm::LLVMContext& getLlvmContext(llvm::LLVMContext& ctx);
+
+
             llvm::Function* getExtFn(const std::string& fnName) {
                 //VOLT_DEBUG("Getting external function: %s", fnName.c_str());
                 return m_codegenContext->getFunction(fnName);
@@ -398,15 +416,17 @@ namespace voltdb { namespace {
                 assert(inputTable != NULL);
                 assert(outputTable != NULL);
 
-                llvm::BasicBlock *scanLoopEntry = llvm::BasicBlock::Create(getLlvmContext(),
-                                                                          "scan_loop_entry",
-                                                                          getFunction());
-                llvm::BasicBlock *scanLoopBody = llvm::BasicBlock::Create(getLlvmContext(),
-                                                                          "scan_loop_body",
-                                                                          getFunction());
                 llvm::BasicBlock *scanLoopExit = llvm::BasicBlock::Create(getLlvmContext(),
                                                                           "scan_loop_exit",
                                                                           getFunction());
+                llvm::BasicBlock *scanLoopEntry = llvm::BasicBlock::Create(getLlvmContext(),
+                                                                           "scan_loop_entry",
+                                                                           getFunction(),
+                                                                           scanLoopExit);
+                llvm::BasicBlock *scanLoopBody = llvm::BasicBlock::Create(getLlvmContext(),
+                                                                          "scan_loop_body",
+                                                                          getFunction(),
+                                                                          scanLoopExit);
 
                 // Allocate space for the TableTuple structure on the stack.
                 // We need to pass a reference to the iterator, and we don't
@@ -451,7 +471,8 @@ namespace voltdb { namespace {
                 if (node->getPredicate()) {
                     llvm::BasicBlock *predPassed = llvm::BasicBlock::Create(getLlvmContext(),
                                                                             "pred_passed",
-                                                                            getFunction());
+                                                                            getFunction(),
+                                                                            scanLoopExit);
 
                     llvm::Value* predResult = codegenSeqScanPredicate(node->getPredicate(), inputTable->schema(), inputTupleStorage);
                     builder().CreateCondBr(predResult, predPassed, scanLoopEntry);
