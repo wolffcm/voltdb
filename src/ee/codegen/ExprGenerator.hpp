@@ -32,10 +32,74 @@ namespace voltdb {
     class TupleValueExpression;
     class ParameterValueExpression;
 
-    namespace {
-        class CGValue;
-        class CGVoltType;
-    }
+    class CGVoltType {
+    public:
+        CGVoltType(ValueType valueType, bool isInlined)
+            : m_valueType(valueType)
+            , m_isInlined(isInlined)
+        {
+        }
+
+        // not explicit
+        CGVoltType(ValueType vt)
+            : m_valueType(vt)
+            , m_isInlined(false)
+        {
+        }
+
+        ValueType ty() const {
+            return m_valueType;
+        }
+
+        bool isInlined() const {
+            return m_isInlined;
+        }
+
+        bool isInlinedVarchar() const {
+            return ty() == VALUE_TYPE_VARCHAR && isInlined();
+        }
+
+    private:
+        ValueType m_valueType;
+        bool m_isInlined;
+    };
+
+    // Bundles an llvm::Value* with may-be-null meta-data,
+    // as well as the value type and inlined info.
+    class CGValue {
+    public:
+        CGValue(llvm::Value* val, bool mayBeNull, const CGVoltType& cgVoltType)
+            : m_value(val)
+            , m_mayBeNull(mayBeNull)
+            , m_cgVoltType(cgVoltType)
+        {
+        }
+
+        llvm::Value* val() const {
+            return m_value;
+        }
+
+        bool mayBeNull() const {
+            return m_mayBeNull;
+        }
+
+        ValueType ty() const {
+            return m_cgVoltType.ty();
+        }
+
+        bool isInlined() const {
+            return m_cgVoltType.isInlined();
+        }
+
+        bool isInlinedVarchar() const {
+            return m_cgVoltType.isInlinedVarchar();
+        }
+
+    private:
+        llvm::Value* m_value;
+        bool m_mayBeNull;
+        CGVoltType m_cgVoltType;
+    };
 
     class ExprGenerator {
     public:
@@ -44,7 +108,9 @@ namespace voltdb {
                       llvm::IRBuilder<>* builder,
                       llvm::Value* tupleArg);
 
-        llvm::Value* generate(const TupleSchema* schema, const AbstractExpression* expr);
+        CGValue
+        codegenExpr(const TupleSchema* tupleSchema,
+                    const AbstractExpression* expr);
 
     private:
 
@@ -99,10 +165,6 @@ namespace voltdb {
         CGValue
         codegenConstantValueExpr(const TupleSchema*,
                                  const ConstantValueExpression* expr);
-
-        CGValue
-        codegenExpr(const TupleSchema* tupleSchema,
-                    const AbstractExpression* expr);
 
         llvm::Function* getExtFn(const std::string& fnName);
 

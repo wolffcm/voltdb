@@ -111,7 +111,7 @@ namespace voltdb {
             void codegen(const TupleSchema* tupleSchema,
                          const AbstractExpression* expr) {
                 ExprGenerator generator(m_codegenContext, m_function, m_builder.get(), getTupleArg());
-                llvm::Value* answer = generator.generate(tupleSchema, expr);
+                llvm::Value* answer = generator.codegenExpr(tupleSchema, expr).val();
                 builder().CreateRet(answer);
             }
 
@@ -353,6 +353,9 @@ namespace voltdb { namespace {
             }
 
 
+            //void storeInTuple(llvm::Value* address,
+
+
             void codegenProjectionInline(ProjectionPlanNode* node,
                                          const TupleSchema* inputSchema,
                                          llvm::Value* inputTupleStorage,
@@ -367,7 +370,7 @@ namespace voltdb { namespace {
                     ExprGenerator generator(m_codegenContext,
                                             getFunction(),
                                             m_builder.get(), inputTupleStorage);
-                    llvm::Value* v = generator.generate(inputSchema, expr);
+                    llvm::Value* v = generator.codegenExpr(inputSchema, expr).val();
 
                     // place the computed expression in the output tuple
                     // Find the offset of the ith column
@@ -385,7 +388,7 @@ namespace voltdb { namespace {
                                                  llvm::Value* tupleStorage) {
                 llvm::LLVMContext &ctx = getLlvmContext();
                 ExprGenerator generator(m_codegenContext, getFunction(), m_builder.get(), tupleStorage);
-                llvm::Value* v = generator.generate(schema, pred);
+                llvm::Value* v = generator.codegenExpr(schema, pred).val();
                 llvm::Value *one = llvm::ConstantInt::get(llvm::Type::getInt8Ty(ctx), 1);
                 llvm::Value* cmpResult = builder().CreateICmpEQ(v, one, "pred_result");
                 return cmpResult;
