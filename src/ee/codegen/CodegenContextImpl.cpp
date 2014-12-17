@@ -299,18 +299,11 @@ namespace voltdb { namespace {
 
             static bool isTrivialScan(SeqScanPlanNode* n) {
                 if (n->getPredicate() != NULL) {
-                    VOLT_DEBUG("Scan is not trivial: has predicate");
+                    //VOLT_DEBUG("Scan is not trivial: has predicate");
                     return false;
                 }
 
                 if (n->getInlinePlanNodes().size() > 0) {
-                    VOLT_DEBUG("Scan is not trivial: found inlined nodes");
-                    typedef std::map<PlanNodeType, AbstractPlanNode*> InlineMap;
-                    const InlineMap& inlineNodes = n->getInlinePlanNodes();
-                    InlineMap::const_iterator end = inlineNodes.end();
-                    for (InlineMap::const_iterator it = inlineNodes.begin(); it != end; ++it) {
-                        VOLT_DEBUG("  %s", planNodeToString(it->first).c_str());
-                    }
                     return false;
                 }
 
@@ -318,7 +311,7 @@ namespace voltdb { namespace {
             }
 
             llvm::Function* getExtFn(const std::string& fnName) {
-                VOLT_DEBUG("Getting external function: %s", fnName.c_str());
+                //VOLT_DEBUG("Getting external function: %s", fnName.c_str());
                 return m_codegenContext->getFunction(fnName);
             }
 

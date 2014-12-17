@@ -28,12 +28,46 @@ namespace voltdb {
 
     namespace {
 
-        // Bundles an llvm::Value* with may-be-null meta-data.
+        class CGVoltType {
+        public:
+            CGVoltType(ValueType valueType, bool isInlined)
+                : m_valueType(valueType)
+                , m_isInlined(isInlined)
+            {
+            }
+
+            // not explicit
+            CGVoltType(ValueType vt)
+                : m_valueType(vt)
+                , m_isInlined(false)
+            {
+            }
+
+            ValueType ty() const {
+                return m_valueType;
+            }
+
+            bool isInlined() const {
+                return m_isInlined;
+            }
+
+            bool isInlinedVarchar() const {
+                return ty() == VALUE_TYPE_VARCHAR && isInlined();
+            }
+
+        private:
+            ValueType m_valueType;
+            bool m_isInlined;
+        };
+
+        // Bundles an llvm::Value* with may-be-null meta-data,
+        // as well as the value type and inlined info.
         class CGValue {
         public:
-            CGValue(llvm::Value* val, bool mayBeNull)
+            CGValue(llvm::Value* val, bool mayBeNull, const CGVoltType& cgVoltType)
                 : m_value(val)
                 , m_mayBeNull(mayBeNull)
+                , m_cgVoltType(cgVoltType)
             {
             }
 
@@ -45,9 +79,22 @@ namespace voltdb {
                 return m_mayBeNull;
             }
 
+            ValueType ty() const {
+                return m_cgVoltType.ty();
+            }
+
+            bool isInlined() const {
+                return m_cgVoltType.isInlined();
+            }
+
+            bool isInlinedVarchar() const {
+                return m_cgVoltType.isInlinedVarchar();
+            }
+
         private:
             llvm::Value* m_value;
             bool m_mayBeNull;
+            CGVoltType m_cgVoltType;
         };
 
         llvm::Value* getNullValueForType(llvm::Type* ty) {
@@ -92,8 +139,16 @@ namespace voltdb {
         return *m_builder;
     }
 
-    llvm::Type* ExprGenerator::getLlvmType(ValueType voltType) {
-        return m_codegenContext->getLlvmType(voltType);
+    // llvm::Type* ExprGenerator::getLlvmType(ValueType voltType) {
+    //     return m_codegenContext->getLlvmType(voltType);
+    // }
+
+    llvm::Type* ExprGenerator::getLlvmType(const CGVoltType& cgVoltType) {
+        if (cgVoltType.ty() == VALUE_TYPE_VARCHAR && cgVoltType.isInlined()) {
+            // outlined strings currently not handled.
+            return llvm::Type::getInt8Ty(m_codegenContext->getLlvmContext());
+        }
+        return m_codegenContext->getLlvmType(cgVoltType.ty());
     }
 
     llvm::Value* ExprGenerator::getTupleArg() {
@@ -112,8 +167,14 @@ namespace voltdb {
     CGValue
     ExprGenerator::codegenParameterValueExpr(const TupleSchema*,
                                              const ParameterValueExpression* expr) {
+        const NValue* paramValue = expr->getParamValue();
+        // I have a theory that parameters and constants are never
+        // marked as inlined, since there's no row to be associated
+        // with them.  But is my theory true???
+        assert(paramValue->getSourceInlined() == false);
+
         llvm::Constant* nvalueAddrAsInt = llvm::ConstantInt::get(getIntPtrType(),
-                                                                 (uintptr_t)expr->getParamValue());
+                                                                 (uintptr_t)paramValue);
 
         // cast the pointer to the nvalue as a pointer to the value.
         // Since the first member of NValue is the 16-byte m_data
@@ -125,7 +186,7 @@ namespace voltdb {
         std::ostringstream varName;
         varName << "param_" << expr->getValueIdx();
         return CGValue(builder().CreateLoad(castedAddr, varName.str().c_str()),
-                       true); // true means value may be null
+                       true, getExprType(expr)); // true means value may be null
     }
 
     CGValue
@@ -142,41 +203,63 @@ namespace voltdb {
                                                 offset);
         // Cast addr from char* to the appropriate pointer type
         // An LLVM IR instruction is created but it will be a no-op on target
-        llvm::Type* ptrTy = llvm::PointerType::getUnqual(getLlvmType(getExprType(expr)));
+        CGVoltType cgVoltType(getExprType(expr), columnInfo->inlined);
+        if (cgVoltType.isInlinedVarchar()) {
+            // just leave it as a pointer to char!
+            return CGValue(addr, columnInfo->allowNull, cgVoltType);
+        }
+
+        llvm::Type* ptrTy = llvm::PointerType::getUnqual(getLlvmType(cgVoltType));
         llvm::Value* castedAddr = builder().CreateBitCast(addr,
                                                           ptrTy);
         std::ostringstream varName;
         varName << "field_" << expr->getColumnId();
         return CGValue(builder().CreateLoad(castedAddr, varName.str().c_str()),
-                       columnInfo->allowNull);
+                       columnInfo->allowNull, cgVoltType);
+    }
+
+    llvm::Value*
+    ExprGenerator::codegenCmpVarchar(ExpressionType exprType,
+                                     const CGValue& lhs,
+                                     const CGValue& rhs) {
+        return NULL; // xxx
     }
 
     llvm::Value*
     ExprGenerator::codegenCmpOp(ExpressionType exprType,
                                 ValueType outputType,
-                                llvm::Value* lhs,
-                                llvm::Value* rhs) {
+                                const CGValue& lhs,
+                                const CGValue& rhs) {
         // For floating point types, we would CreateFCmp* here instead...
+
+        if (lhs.isInlinedVarchar()) {
+            // find the shorter string.
+            // invoke strncmp(lhs, rhs, shorterLen)
+            // return comparison with return code
+        }
+
+        llvm::Value* lhsv = lhs.val();
+        llvm::Value* rhsv = rhs.val();
 
         llvm::Value* cmp = NULL;
         switch (exprType) {
         case EXPRESSION_TYPE_COMPARE_EQUAL:
-            cmp = builder().CreateICmpEQ(lhs, rhs);
+            cmp = builder().CreateICmpEQ(lhsv, rhsv);
             break;
         case EXPRESSION_TYPE_COMPARE_NOTEQUAL:
-            cmp = builder().CreateICmpNE(lhs, rhs);
+            cmp = builder().CreateICmpNE(lhsv, rhsv);
             break;
         case EXPRESSION_TYPE_COMPARE_LESSTHAN:
-            cmp = builder().CreateICmpSLT(lhs, rhs);
+            cmp = builder().CreateICmpSLT(lhsv, rhsv);
             break;
         case EXPRESSION_TYPE_COMPARE_GREATERTHAN:
-            cmp = builder().CreateICmpSGT(lhs, rhs);
+            cmp = builder().CreateICmpSGT(lhsv, rhsv);
             break;
         case EXPRESSION_TYPE_COMPARE_LESSTHANOREQUALTO:
-            cmp = builder().CreateICmpSLE(lhs, rhs);
+            cmp = builder().CreateICmpSLE(lhsv, rhsv);
             break;
         case EXPRESSION_TYPE_COMPARE_GREATERTHANOREQUALTO:
-            cmp = builder().CreateICmpSGE(lhs, rhs);
+            cmp = builder().CreateICmpSGE(lhsv, rhsv);
             break;
         default:
             throw UnsupportedForCodegenException(expressionToString(exprType));
@@ -197,9 +280,19 @@ namespace voltdb {
         return llvm::ConstantInt::get(getLlvmType(VALUE_TYPE_BOOLEAN), 0);
     }
 
+    // return an i1 that will be 1 if the expression is null.
     llvm::Value*
-    ExprGenerator::compareToNull(llvm::Value* val) {
-        return builder().CreateICmpEQ(val, getNullValueForType(val->getType()));
+    ExprGenerator::compareToNull(const CGValue& cgVal) {
+        if (cgVal.isInlinedVarchar()) {
+            VOLT_DEBUG("Generating null compare for varchar");
+            // Check the OBJECT_NULL_BIT in the first byte.
+            llvm::Value* firstByte = builder().CreateLoad(cgVal.val());
+            llvm::Value* andWithNullBit = builder().CreateAnd(firstByte, OBJECT_NULL_BIT);
+            return builder().CreateICmpNE(andWithNullBit, getFalseValue(), "vc_is_null");
+        }
+        else {
+            return builder().CreateICmpEQ(cgVal.val(), getNullValueForType(cgVal.val()->getType()));
+        }
     }
 
     llvm::BasicBlock*
@@ -300,22 +393,34 @@ namespace voltdb {
         }
 
         bool mayBeNull = left.mayBeNull() || right.mayBeNull();
-        return CGValue(phi,
-                       mayBeNull);
+        return CGValue(phi, mayBeNull, getExprType(expr));
     }
 
     // Sign-extend one side to the width of the wider side.
     // This will only work if lhs/rhs values are NOT NULL!
-    std::pair<llvm::Value*, llvm::Value*> ExprGenerator::homogenizeTypes(llvm::Value* lhs, llvm::Value* rhs) {
-        llvm::IntegerType* lhsTy = llvm::dyn_cast<llvm::IntegerType>(lhs->getType());
-        llvm::IntegerType* rhsTy = llvm::dyn_cast<llvm::IntegerType>(rhs->getType());
+    std::pair<CGValue, CGValue> ExprGenerator::homogenizeTypes(const CGValue& lhs,
+                                                               const CGValue& rhs) {
+
+        if (lhs.isInlinedVarchar() != rhs.isInlinedVarchar()) {
+            throw UnsupportedForCodegenException("Heterogenous compare with varchar");
+        }
+        else if (lhs.isInlinedVarchar()) {
+            return std::make_pair(lhs, rhs);
+        }
+
+        llvm::IntegerType* lhsTy = llvm::dyn_cast<llvm::IntegerType>(lhs.val()->getType());
+        llvm::IntegerType* rhsTy = llvm::dyn_cast<llvm::IntegerType>(rhs.val()->getType());
 
         if (lhsTy->getBitWidth() > rhsTy->getBitWidth()) {
             return std::make_pair(lhs,
-                                  builder().CreateSExt(rhs, lhsTy));
+                                  CGValue(builder().CreateSExt(rhs.val(), lhsTy),
+                                          rhs.mayBeNull(),
+                                          lhs.ty()));
         }
         else if (rhsTy->getBitWidth() > lhsTy->getBitWidth()) {
-            return std::make_pair(builder().CreateSExt(lhs, rhsTy),
+            return std::make_pair(CGValue(builder().CreateSExt(lhs.val(), rhsTy),
+                                          lhs.mayBeNull(),
+                                          rhs.ty()),
                                   rhs);
         }
 
@@ -334,7 +439,7 @@ namespace voltdb {
         if (left.mayBeNull()) { // value produced on LHS may be null
             llvm::BasicBlock* lhsIsNull = getEmptyBasicBlock("cmp_lhs_null");
             llvm::BasicBlock* lhsNotNull = getEmptyBasicBlock("cmp_lhs_not_null");
-            llvm::Value* cmp = compareToNull(left.val());
+            llvm::Value* cmp = compareToNull(left);
             builder().CreateCondBr(cmp, lhsIsNull, lhsNotNull);
 
             builder().SetInsertPoint(lhsIsNull);
@@ -350,7 +455,7 @@ namespace voltdb {
         if (right.mayBeNull()) { // value produced on RHS may be null
             llvm::BasicBlock* rhsIsNull = getEmptyBasicBlock("cmp_rhs_null");
             llvm::BasicBlock* rhsNotNull = getEmptyBasicBlock("cmp_rhs_not_null");
-            llvm::Value* cmp = compareToNull(right.val());
+            llvm::Value* cmp = compareToNull(right);
             builder().CreateCondBr(cmp, rhsIsNull, rhsNotNull);
 
             builder().SetInsertPoint(rhsIsNull);
@@ -362,8 +467,7 @@ namespace voltdb {
         }
 
         // Types on both sides may not be the same.
-        std::pair<llvm::Value*, llvm::Value*> lhsRhs;
-        lhsRhs = homogenizeTypes(left.val(), right.val());
+        std::pair<CGValue, CGValue> lhsRhs = homogenizeTypes(left, right);
 
         llvm::Value* cmp = codegenCmpOp(expr->getExpressionType(),
                                         getExprType(expr),
@@ -382,8 +486,7 @@ namespace voltdb {
         }
 
         bool mayBeNull = left.mayBeNull() || right.mayBeNull();
-        return CGValue(phi,
-                       mayBeNull);
+        return CGValue(phi, mayBeNull, getExprType(expr));
     }
 
     CGValue
@@ -393,12 +496,12 @@ namespace voltdb {
                                     expr->getLeft());
         if (! child.mayBeNull()) {
             // argument is never null, is isNull is always false here.
-            return CGValue(getFalseValue(), false);
+            return CGValue(getFalseValue(), false, VALUE_TYPE_BOOLEAN);
         }
 
-        llvm::Value* cmp = compareToNull(child.val());
+        llvm::Value* cmp = compareToNull(child);
         return CGValue(builder().CreateZExt(cmp, getLlvmType(VALUE_TYPE_BOOLEAN)),
-                       false); // result will never be null
+                       false, VALUE_TYPE_BOOLEAN); // result will never be null
     }
 
     CGValue
@@ -407,15 +510,18 @@ namespace voltdb {
         // constant value should never need to access tuples,
         // so it should be ok to just pass nulls here.
         NValue nval = expr->eval(NULL, NULL);
-        llvm::Type* ty = getLlvmType(ValuePeeker::peekValueType(nval));
+        assert(nval.getSourceInlined() == false);
+
+        ValueType vt = ValuePeeker::peekValueType(nval);
+        llvm::Type* ty = getLlvmType(vt);
         if (nval.isNull()) {
             return CGValue(getNullValueForType(ty),
-                           true);
+                           true, vt);
         }
 
         llvm::Value* k = llvm::ConstantInt::get(ty,
                                                 ValuePeeker::peekAsBigInt(nval));
-        return CGValue(k, false); // never null if we get here.
+        return CGValue(k, false, vt); // never null if we get here.
     }
 
     CGValue

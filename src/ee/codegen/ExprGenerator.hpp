@@ -34,6 +34,7 @@ namespace voltdb {
 
     namespace {
         class CGValue;
+        class CGVoltType;
     }
 
     class ExprGenerator {
@@ -49,17 +50,18 @@ namespace voltdb {
 
         llvm::IRBuilder<>& builder();
         llvm::LLVMContext& getLlvmContext();
-        llvm::Type* getLlvmType(ValueType voltType);
+        //llvm::Type* getLlvmType(ValueType voltType, bool isInlined);
+        llvm::Type* getLlvmType(const CGVoltType& voltType);
         llvm::Type* getIntPtrType();
         llvm::Value* getTupleArg();
         llvm::Value* getTrueValue();
         llvm::Value* getFalseValue();
-        llvm::Value* compareToNull(llvm::Value* val);
+        llvm::Value* compareToNull(const CGValue& cgVal);
 
         llvm::BasicBlock* getEmptyBasicBlock(const std::string& label);
 
-        std::pair<llvm::Value*, llvm::Value*> homogenizeTypes(llvm::Value* lhs,
-                                                              llvm::Value* rhs);
+        std::pair<CGValue, CGValue> homogenizeTypes(const CGValue& lhs,
+                                                              const CGValue& rhs);
 
 
         CGValue
@@ -69,10 +71,17 @@ namespace voltdb {
         codegenTupleValueExpr(const TupleSchema* schema,
                               const TupleValueExpression* expr);
         llvm::Value*
+        codegenCmpVarchar(ExpressionType exprType,
+                          const CGValue& lhs,
+                          const CGValue& rhs);
+
+        llvm::Value*
         codegenCmpOp(ExpressionType exprType,
                      ValueType outputType,
-                     llvm::Value* lhs,
-                     llvm::Value* rhs);
+                     const CGValue& lhs,
+                     const CGValue& rhs);
+
+
         CGValue
         codegenConjunctionAndExpr(const TupleSchema* tupleSchema,
                                   const AbstractExpression* expr);
