@@ -104,9 +104,14 @@ namespace voltdb {
             return m_cgVoltType.isOutlinedVarchar();
         }
 
+        bool isVarchar() const {
+            return ty() == VALUE_TYPE_VARCHAR;
+        }
+
         llvm::Value* getInlinedVarcharTotalLength(llvm::IRBuilder<>& builder) const;
 
-        ValuePair getVarcharLengthAndData(llvm::IRBuilder<>& builder) const;
+        ValuePair getVarcharLengthAndData(CodegenContextImpl *cgCtx,
+                                          llvm::IRBuilder<>& builder) const;
 
 
     private:

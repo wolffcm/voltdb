@@ -22,6 +22,7 @@
 #include "common/types.h"
 
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include <string>
 #include <sstream>
@@ -109,6 +110,18 @@ namespace voltdb {
     ValueType getExprType(const AbstractExpression* expr);
 
     llvm::IntegerType* getNativeSizeType(llvm::LLVMContext& ctx);
+    llvm::StructType* getStringRefType(llvm::LLVMContext &ctx);
+    llvm::PointerType* getPtrToStringRefType(llvm::LLVMContext &ctx);
+    llvm::PointerType* getPtrToPtrToStringRefType(llvm::LLVMContext &ctx);
+
+    // Works with llvm::Value and llvm::Type
+    template<typename T>
+    std::string debugLlvm(T* v) {
+        std::string irDump;
+        llvm::raw_string_ostream rso(irDump);
+        v->print(rso);
+        return irDump;
+    }
 }
 
 #endif

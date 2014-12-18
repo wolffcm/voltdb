@@ -72,6 +72,23 @@ namespace voltdb {
         return nativeSizeTy;
     }
 
+    llvm::StructType* getStringRefType(llvm::LLVMContext &ctx) {
+        llvm::Type* ptrToCharTy = llvm::Type::getInt8PtrTy(ctx);
+        return llvm::StructType::get(ptrToCharTy,
+                                     getNativeSizeType(ctx),
+                                     llvm::Type::getInt8Ty(ctx),
+                                     NULL);
+    }
+
+    llvm::PointerType* getPtrToStringRefType(llvm::LLVMContext &ctx) {
+        return llvm::PointerType::getUnqual(getStringRefType(ctx));
+    }
+
+    llvm::PointerType* getPtrToPtrToStringRefType(llvm::LLVMContext &ctx) {
+        return llvm::PointerType::getUnqual(getPtrToStringRefType(ctx));
+    }
+
+
     ValueType getExprType(const AbstractExpression* expr) {
             switch (expr->getExpressionType()) {
             case EXPRESSION_TYPE_COMPARE_EQUAL:
@@ -206,6 +223,40 @@ extern "C" {
     char* stringref_get(voltdb::StringRef* sr) {
         return sr->get();
     }
+
+    void stringref_debug(voltdb::StringRef* sr) {
+#if VOLT_LOG_LEVEL<=VOLT_LEVEL_TRACE
+        if (sr != NULL) {
+            VOLT_TRACE("StringRef addr %p", sr);
+            VOLT_TRACE("StringRef get() %p", sr->get());
+
+            const char mask = ~static_cast<char>(OBJECT_NULL_BIT | OBJECT_CONTINUATION_BIT);
+
+            char *data = sr->get();
+            char contBit = data[0] & OBJECT_CONTINUATION_BIT;
+            VOLT_TRACE("  data[0] & OBJECT_CONTINUATION_BIT: %d", contBit);
+            char nullBit = data[0] & OBJECT_NULL_BIT;
+            VOLT_TRACE("  data[0] & OBJECT_NULL_BIT: %d", nullBit);
+            char shortDataSize = data[0] & mask;
+            VOLT_TRACE("  shortDataSize: %d", shortDataSize);
+        }
+        else {
+            VOLT_TRACE("StringRef is NULL");
+        }
+#endif
+    }
+
+    void codegen_debug_ptr(size_t i64Num, void* ptr) {
+        VOLT_TRACE("---");
+        VOLT_TRACE("  Here's a number: %ld", i64Num);
+        VOLT_TRACE("  Here's a pointer: %p", ptr);
+    }
+
+    void codegen_debug_size(size_t i64Num, size_t data) {
+        VOLT_TRACE("---");
+        VOLT_TRACE("  Here's a number: %ld", i64Num);
+        VOLT_TRACE("  Here's a pointer: %ld", data);
+    }
 }
 
 namespace voltdb { namespace {
@@ -230,7 +281,7 @@ namespace voltdb { namespace {
 
             module->getOrInsertFunction("iterator_next", boolTy, charPtrTy, ptrToTupleTy, NULL);
 
-            module->getOrInsertFunction("stringref_get", charPtrTy, charPtrTy, NULL);
+            module->getOrInsertFunction("stringref_get", charPtrTy, getPtrToStringRefType(ctx), NULL);
 
             // Man page defines strncmp like this
             //   int strncmp(const char *s1, const char *s2, size_t n);
@@ -244,15 +295,22 @@ namespace voltdb { namespace {
             //   void *memcpy(void *restrict dst, const void *restrict src, size_t n);
             module->getOrInsertFunction("memcpy",  charPtrTy,
                                         charPtrTy, charPtrTy, nativeSizeTy, NULL);
-        }
 
-        // Works with llvm::Value and llvm::Type
-        template<typename T>
-        std::string debugLlvm(T* v) {
-            std::string irDump;
-            llvm::raw_string_ostream rso(irDump);
-            v->print(rso);
-            return irDump;
+            llvm::Type* ptrToStringRef = llvm::PointerType::getUnqual(getStringRefType(ctx));
+            module->getOrInsertFunction("stringref_debug",
+                                        voidTy,
+                                        ptrToStringRef,
+                                        NULL);
+            module->getOrInsertFunction("codegen_debug_ptr",
+                                        voidTy,
+                                        getNativeSizeType(ctx),
+                                        charPtrTy,
+                                        NULL);
+            module->getOrInsertFunction("codegen_debug_size",
+                                        voidTy,
+                                        getNativeSizeType(ctx),
+                                        getNativeSizeType(ctx),
+                                        NULL);
         }
 
         class PlanNodeFnCtx {
@@ -365,6 +423,7 @@ namespace voltdb { namespace {
 
 
             void storeInTuple(llvm::Value* addressInTupleStorage, const CGValue& cgVal) {
+                VOLT_TRACE("Entering");
                 llvm::LLVMContext& ctx = cgVal.val()->getContext();
                 if (cgVal.isInlinedVarchar()) {
                     // Use memcpy
@@ -376,7 +435,7 @@ namespace voltdb { namespace {
                 }
                 else if (cgVal.isOutlinedVarchar()) {
                     // Just copy the StringRef* into the field.
-                    llvm::Type* ptrToPtrTy = llvm::PointerType::getUnqual(llvm::Type::getInt8PtrTy(ctx));
+                    llvm::Type* ptrToPtrTy = getPtrToPtrToStringRefType(ctx);
 
                     addressInTupleStorage = builder().CreateBitCast(addressInTupleStorage, ptrToPtrTy);
                     builder().CreateStore(cgVal.val(), addressInTupleStorage);
@@ -405,7 +464,7 @@ namespace voltdb { namespace {
                                             getFunction(),
                                             m_builder.get(), inputTupleStorage);
                     CGValue cgv = generator.codegenExpr(inputSchema, expr);
-
+                    VOLT_TRACE("Projected expression %d generated", i);
                     // place the computed expression in the output tuple
                     // Find the offset of the ith column
                     llvm::Value* offset = m_codegenContext->getColumnOffset(outputSchema, i);
@@ -515,11 +574,13 @@ namespace voltdb { namespace {
                 }
 
                 if (projNode != NULL) {
+                    VOLT_TRACE("Generating projection");
                     codegenProjectionInline(projNode,
                                             inputTable->schema(),
                                             inputTupleStorage,
                                             outputTable->schema(),
                                             outputTupleStorage);
+                    VOLT_TRACE("Projection complete");
                 }
                 llvm::Function* insertTupleFn =
                     getExtFn("table_insert_tuple_nonvirtual");
@@ -698,7 +759,7 @@ namespace voltdb { namespace {
     CodegenContextImpl::compilePredicate(const std::string& fnName,
                                      const TupleSchema* tupleSchema,
                                      const AbstractExpression* expr) {
-        VOLT_DEBUG("Attempting to compile predicate:\n%s", expr->debug(true).c_str());
+        VOLT_TRACE("Attempting to compile predicate:\n%s", expr->debug(true).c_str());
         PredFnCtx predFnCtx(this, fnName);
         boost::timer t;
 
