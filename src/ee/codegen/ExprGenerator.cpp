@@ -50,8 +50,10 @@ namespace voltdb {
             }
         }
 
+
+
         llvm::Value*
-        getVarcharLength(llvm::IRBuilder<>& builder, const CGValue& vcVal) {
+        getInlinedVarcharLength(llvm::IRBuilder<>& builder, const CGValue& vcVal) {
             assert(vcVal.isInlinedVarchar());
 
             // load the first byte
@@ -62,27 +64,102 @@ namespace voltdb {
             return len;
         }
 
-        llvm::Value* getVarcharData(llvm::IRBuilder<>& builder, const CGValue& vcVal) {
+        llvm::Value* getInlinedVarcharData(llvm::IRBuilder<>& builder, const CGValue& vcVal) {
             assert(vcVal.isInlinedVarchar());
             return builder.CreateConstGEP1_32(vcVal.val(), 1);
         }
+
+        // Returns a pointer to the length prefix
+        llvm::Value* getOutlinedVarcharBuffer(llvm::IRBuilder<>& builder, const CGValue& vcVal) {
+            llvm::LLVMContext &ctx  = vcVal.val()->getContext();
+            // pointer to the string ref is really a pointer to the buffer.
+            //
+            // model it as char**
+            llvm::Type* ptrToPtrTy = llvm::PointerType::getUnqual(llvm::Type::getInt8PtrTy(ctx));
+            llvm::Value* ptrToPtrToBuffer = builder.CreateBitCast(vcVal.val(), ptrToPtrTy);
+            llvm::Value* ptrToBuffer = builder.CreateLoad(ptrToPtrToBuffer);
+
+            // skip the StringRef* back pointer
+            ptrToBuffer = builder.CreateConstGEP1_32(ptrToBuffer, sizeof(StringRef*));
+
+            return ptrToBuffer;
+        }
     }
 
-    llvm::Value* CGValue::getVarcharDataLength(llvm::IRBuilder<>& builder) const {
-        assert(isInlinedVarchar());
-        return getVarcharLength(builder, *this);
+    ValuePair CGValue::getVarcharLengthAndData(llvm::IRBuilder<>& builder) const {
+        if (isInlinedVarchar()) {
+            return std::make_pair(getInlinedVarcharLength(builder, *this),
+                                  getInlinedVarcharData(builder, *this));
+        }
 
+        assert(isOutlinedVarchar());
+        llvm::Value* dataBuffer = getOutlinedVarcharBuffer(builder, *this);
+        llvm::LLVMContext &ctx  = dataBuffer->getContext();
+
+        // Now need to skip the length prefix.
+        // The first byte describes how long the prefix is.
+        llvm::IntegerType* int8Ty = llvm::Type::getInt8Ty(ctx);
+        llvm::Value *firstByte = builder.CreateLoad(dataBuffer);
+        llvm::Value *contBit = llvm::ConstantInt::get(int8Ty, OBJECT_CONTINUATION_BIT);
+        llvm::Value *contBitIsSet = builder.CreateAnd(firstByte, contBit);
+        contBitIsSet = builder.CreateICmpNE(contBitIsSet,
+                                            builder.getInt8(0),
+                                            "cont_bit");
+
+        llvm::BasicBlock* currBlock = builder.GetInsertBlock();
+        llvm::BasicBlock* merge = llvm::BasicBlock::Create(ctx, "merge", currBlock->getParent());
+        merge->moveAfter(currBlock);
+
+        llvm::BasicBlock* isLongData = llvm::BasicBlock::Create(ctx, "is_long_data", currBlock->getParent(), merge);
+        llvm::BasicBlock* isShortData = llvm::BasicBlock::Create(ctx, "is_short_data", currBlock->getParent(), merge);
+
+        builder.CreateCondBr(contBitIsSet, isLongData, isShortData);
+
+        const char mask = ~static_cast<char>(OBJECT_CONTINUATION_BIT | OBJECT_NULL_BIT);
+
+        builder.SetInsertPoint(isLongData);
+        //llvm::Value* longLengthLength = builder.getInt8(LONG_OBJECT_LENGTHLENGTH);
+
+        llvm::Value* fourBytes = builder.CreateAlloca(builder.getInt8Ty(), builder.getInt8(4));
+        // populate the four bytes, swapping from original
+        for (int i = 0; i < 4; ++i) {
+            llvm::Value* src = builder.CreateConstGEP1_32(dataBuffer, i);
+            llvm::Value* byte = builder.CreateLoad(src);
+            if (i == 0) {
+                byte = builder.CreateAnd(byte, builder.getInt8(mask));
+            }
+            llvm::Value* dst = builder.CreateConstGEP1_32(fourBytes, 3 - i);
+            builder.CreateStore(byte, dst);
+        }
+
+        llvm::Value* longLength = builder.CreateBitCast(fourBytes, builder.getInt32Ty());
+        llvm::Value* longData = builder.CreateConstGEP1_32(dataBuffer, LONG_OBJECT_LENGTHLENGTH);
+
+        builder.SetInsertPoint(isShortData);
+
+        llvm::Value* shortLength = builder.CreateAnd(firstByte, builder.getInt8(mask));
+        llvm::Value* shortData = builder.CreateConstGEP1_32(dataBuffer, SHORT_OBJECT_LENGTHLENGTH);
+
+        builder.SetInsertPoint(merge);
+        llvm::PHINode* len = builder.CreatePHI(getNativeSizeType(ctx), 2);
+        len->addIncoming(longLength, isLongData);
+        len->addIncoming(shortLength, isShortData);
+        llvm::PHINode* data = builder.CreatePHI(builder.getInt8PtrTy(), 2);
+        data->addIncoming(longData, isLongData);
+        data->addIncoming(shortData, isShortData);
+
+        return std::make_pair(len, data);
     }
 
-    llvm::Value* CGValue::getVarcharTotalLength(llvm::IRBuilder<>& builder) const {
+    // Used by project node to do memcpy
+    llvm::Value* CGValue::getInlinedVarcharTotalLength(llvm::IRBuilder<>& builder) const {
         assert(isInlinedVarchar());
-        llvm::Value* dataLen = getVarcharDataLength(builder);
+        llvm::Value* dataLen = getInlinedVarcharData(builder, *this);
         llvm::Value* shortLengthLength = llvm::ConstantInt::get(getNativeSizeType(dataLen->getContext()),
                                                                 SHORT_OBJECT_LENGTHLENGTH);
         llvm::Value* totalLen = builder.CreateAdd(dataLen, shortLengthLength);
         return totalLen;
     }
-
 
     ExprGenerator::ExprGenerator(CodegenContextImpl* codegenContext,
                                  llvm::Function* function,
@@ -164,6 +241,16 @@ namespace voltdb {
             // just leave it as a pointer to char!
             return CGValue(addr, columnInfo->allowNull, cgVoltType);
         }
+        else if (cgVoltType.isOutlinedVarchar()) {
+            llvm::LLVMContext &ctx = addr->getContext();
+
+            // cast addr (char*) to StringRef**, which we're modeling as char**.
+            llvm::Type* ptrToPtrTy = llvm::PointerType::getUnqual(llvm::Type::getInt8PtrTy(ctx));
+            addr = builder().CreateBitCast(addr, ptrToPtrTy);
+            addr = builder().CreateLoad(addr);
+
+            return CGValue(addr, columnInfo->allowNull, cgVoltType);
+        }
 
         llvm::Type* ptrTy = llvm::PointerType::getUnqual(getLlvmType(cgVoltType));
         llvm::Value* castedAddr = builder().CreateBitCast(addr,
@@ -184,10 +271,17 @@ namespace voltdb {
                                      const CGValue& lhs,
                                      const CGValue& rhs) {
         llvm::LLVMContext& ctx = lhs.val()->getContext();
-        llvm::Value* lhsLen = getVarcharLength(builder(), lhs);
-        llvm::Value* rhsLen = getVarcharLength(builder(), rhs);
+
+        ValuePair lhsLenData = lhs.getVarcharLengthAndData(builder());
+        ValuePair rhsLenData = rhs.getVarcharLengthAndData(builder());
+        llvm::Value* lhsLen = lhsLenData.first;
+        llvm::Value* rhsLen = rhsLenData.first;
+        llvm::Value* lhsData = lhsLenData.second;
+        llvm::Value* rhsData = rhsLenData.second;
         lhsLen->setName("vc_lhs_len");
         rhsLen->setName("vc_rhs_len");
+        lhsData->setName("vc_lhs_data");
+        rhsData->setName("vc_rhs_data");
 
         llvm::Value* lenDiff = builder().CreateSub(lhsLen, rhsLen, "len_diff");
         llvm::Value* lhsShorter = builder().CreateICmpSLT(lenDiff,
@@ -198,8 +292,6 @@ namespace voltdb {
                                                    getNativeSizeType(ctx),
                                                    "min_len");
         // now call strncmp(lhs, rhs, shorterLen);
-        llvm::Value* lhsData = getVarcharData(builder(), lhs);
-        llvm::Value* rhsData = getVarcharData(builder(), rhs);
         llvm::Value* cmpResult = builder().CreateCall3(getExtFn("strncmp"),
                                                        lhsData,
                                                        rhsData,

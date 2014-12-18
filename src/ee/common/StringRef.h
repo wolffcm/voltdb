@@ -70,9 +70,10 @@ namespace voltdb
 
         void setBackPtr();
 
+        char* m_stringPtr;
         std::size_t m_size;
         bool m_tempPool;
-        char* m_stringPtr;
+
     };
 }
 

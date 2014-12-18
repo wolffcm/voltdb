@@ -32,6 +32,7 @@
 #include "common/types.h"
 #include "common/value_defs.h"
 #include "common/ValuePeeker.hpp"
+#include "common/StringRef.h"
 #include "executors/abstractexecutor.h"
 #include "expressions/abstractexpression.h"
 #include "expressions/comparisonexpression.h"
@@ -201,6 +202,10 @@ extern "C" {
     bool iterator_next(voltdb::TableIterator* iterator, voltdb::TableTuple* tuple) {
         return iterator->next(*tuple);
     }
+
+    char* stringref_get(voltdb::StringRef* sr) {
+        return sr->get();
+    }
 }
 
 namespace voltdb { namespace {
@@ -224,6 +229,8 @@ namespace voltdb { namespace {
             module->getOrInsertFunction("table_schema", charPtrTy, charPtrTy, NULL);
 
             module->getOrInsertFunction("iterator_next", boolTy, charPtrTy, ptrToTupleTy, NULL);
+
+            module->getOrInsertFunction("stringref_get", charPtrTy, charPtrTy, NULL);
 
             // Man page defines strncmp like this
             //   int strncmp(const char *s1, const char *s2, size_t n);
@@ -358,13 +365,21 @@ namespace voltdb { namespace {
 
 
             void storeInTuple(llvm::Value* addressInTupleStorage, const CGValue& cgVal) {
+                llvm::LLVMContext& ctx = cgVal.val()->getContext();
                 if (cgVal.isInlinedVarchar()) {
                     // Use memcpy
                     llvm::Function* memcpyFn = getExtFn("memcpy");
                     builder().CreateCall3(memcpyFn,
                                           addressInTupleStorage,
                                           cgVal.val(),
-                                          cgVal.getVarcharTotalLength(builder()));
+                                          cgVal.getInlinedVarcharTotalLength(builder()));
+                }
+                else if (cgVal.isOutlinedVarchar()) {
+                    // Just copy the StringRef* into the field.
+                    llvm::Type* ptrToPtrTy = llvm::PointerType::getUnqual(llvm::Type::getInt8PtrTy(ctx));
+
+                    addressInTupleStorage = builder().CreateBitCast(addressInTupleStorage, ptrToPtrTy);
+                    builder().CreateStore(cgVal.val(), addressInTupleStorage);
                 }
                 else {
                     llvm::Type* elemTy = m_codegenContext->getLlvmType(cgVal.ty());

@@ -59,11 +59,16 @@ namespace voltdb {
             return ty() == VALUE_TYPE_VARCHAR && isInlined();
         }
 
+        bool isOutlinedVarchar() const {
+            return ty() == VALUE_TYPE_VARCHAR && !isInlined();
+        }
+
     private:
         ValueType m_valueType;
         bool m_isInlined;
     };
 
+    typedef std::pair<llvm::Value*, llvm::Value*> ValuePair;
     // Bundles an llvm::Value* with may-be-null meta-data,
     // as well as the value type and inlined info.
     class CGValue {
@@ -95,8 +100,14 @@ namespace voltdb {
             return m_cgVoltType.isInlinedVarchar();
         }
 
-        llvm::Value* getVarcharDataLength(llvm::IRBuilder<>& builder) const;
-        llvm::Value* getVarcharTotalLength(llvm::IRBuilder<>& builder) const;
+        bool isOutlinedVarchar() const {
+            return m_cgVoltType.isOutlinedVarchar();
+        }
+
+        llvm::Value* getInlinedVarcharTotalLength(llvm::IRBuilder<>& builder) const;
+
+        ValuePair getVarcharLengthAndData(llvm::IRBuilder<>& builder) const;
+
 
     private:
         llvm::Value* m_value;
