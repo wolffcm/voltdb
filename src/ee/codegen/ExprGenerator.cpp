@@ -258,10 +258,14 @@ namespace voltdb {
     }
 
     llvm::Type* ExprGenerator::getLlvmType(const CGVoltType& cgVoltType) {
-        if (cgVoltType.ty() == VALUE_TYPE_VARCHAR && cgVoltType.isInlined()) {
-            // outlined strings currently not handled.
+        if (cgVoltType.isInlinedVarchar()) {
+
             return llvm::Type::getInt8Ty(m_codegenContext->getLlvmContext());
+        } else if (cgVoltType.isOutlinedVarchar()) {
+            return getPtrToStringRefType(getLlvmContext());
+
         }
+
         return m_codegenContext->getLlvmType(cgVoltType.ty());
     }
 
@@ -277,7 +281,6 @@ namespace voltdb {
         return m_codegenContext->getLlvmContext();
     }
 
-
     CGValue
     ExprGenerator::codegenParameterValueExpr(const TupleSchema*,
                                              const ParameterValueExpression* expr) {
@@ -288,14 +291,9 @@ namespace voltdb {
         // with them.  But is my theory true???
         assert(paramValue->getSourceInlined() == false);
 
+        llvm::PointerType* ptrTy = llvm::PointerType::getUnqual(getLlvmType(getExprType(expr)));
         llvm::Constant* nvalueAddrAsInt = llvm::ConstantInt::get(getIntPtrType(),
                                                                  (uintptr_t)paramValue);
-
-        // cast the pointer to the nvalue as a pointer to the value.
-        // Since the first member of NValue is the 16-byte m_data
-        // array, this is okay for all the numeric types.  But if
-        // NValue ever changes, this code will break.
-        llvm::PointerType* ptrTy = llvm::PointerType::getUnqual(getLlvmType(getExprType(expr)));
         llvm::Value* castedAddr = builder().CreateIntToPtr(nvalueAddrAsInt, ptrTy);
 
         std::ostringstream varName;
@@ -768,9 +766,21 @@ namespace voltdb {
                            true, vt);
         }
 
-        llvm::Value* k = llvm::ConstantInt::get(ty,
-                                                ValuePeeker::peekAsBigInt(nval));
-        return CGValue(k, false, vt); // never null if we get here.
+        if (vt != VALUE_TYPE_VARCHAR) {
+            llvm::Value* k = llvm::ConstantInt::get(ty,
+                                                    ValuePeeker::peekAsBigInt(nval));
+            return CGValue(k, false, vt); // never null if we get here.
+        }
+        else {
+            // grab the pointer to the string ref
+            NValue* pNVal = &nval;
+            StringRef** ppStringRef = reinterpret_cast<StringRef**>(pNVal);
+            StringRef* pStringRef = *ppStringRef;
+            llvm::Value* v = llvm::ConstantInt::get(getIntPtrType(),
+                                                 (uintptr_t)pStringRef);
+            v = builder().CreateIntToPtr(v, getPtrToStringRefType(getLlvmContext()));
+            return CGValue(v, false, vt);
+        }
     }
 
     CGValue
