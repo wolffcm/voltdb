@@ -61,6 +61,9 @@
 static pthread_once_t llvmNativeTargetInitialized = PTHREAD_ONCE_INIT;
 
 static void initializeNativeTarget() {
+    bool success = llvm::llvm_start_multithreaded();
+    (void)success;
+    assert(success);
     (void)llvm::InitializeNativeTarget();
 }
 
