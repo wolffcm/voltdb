@@ -18,11 +18,11 @@
 // Uncomment this to get informative debug messages
 // regarding codegen
 //
-#ifdef VOLT_LOG_LEVEL
-#undef VOLT_LOG_LEVEL
-#endif
+// #ifdef VOLT_LOG_LEVEL
+// #undef VOLT_LOG_LEVEL
+// #endif
 
-#define VOLT_LOG_LEVEL VOLT_LEVEL_DEBUG
+// #define VOLT_LOG_LEVEL VOLT_LEVEL_DEBUG
 
 #include "codegen/CodegenContextImpl.hpp"
 #include "codegen/ExprGenerator.hpp"
@@ -708,15 +708,13 @@ namespace voltdb { namespace {
         return m_executionEngine->getDataLayout()->getIntPtrType(*m_llvmContext);
     }
 
-    static void dumpModule(llvm::Module* module, const std::string& desc) {
-#if VOLT_LOG_LEVEL<=VOLT_LEVEL_DEBUG
-        std::string irDump;
-        llvm::raw_string_ostream rso(irDump);
-        module->print(rso, NULL);
-        VOLT_DEBUG("%s LLVM IR in module: \n%s", desc.c_str(), irDump.c_str());
-#else
-        (void)module;
-#endif
+    static void dumpFn(llvm::Function* fn, const std::string& desc, int forLogLevel) {
+        if (VOLT_LOG_LEVEL <= forLogLevel) {
+            std::string irDump;
+            llvm::raw_string_ostream rso(irDump);
+            fn->print(rso, NULL);
+            VOLT_DEBUG("%s LLVM IR in module: \n%s", desc.c_str(), irDump.c_str());
+        }
     }
 
     llvm::Value* CodegenContextImpl::getColumnOffset(const TupleSchema* schema, int columnId) {
@@ -732,7 +730,7 @@ namespace voltdb { namespace {
         boost::timer t;
 
         // Dump the unoptimized fn
-        dumpModule(m_module, "Unoptimized");
+        dumpFn(fn, "Unoptimized", VOLT_LEVEL_DEBUG);
 
         // This will throw an exception if we did anything wonky in LLVM IR
         t.restart();
@@ -750,7 +748,7 @@ namespace voltdb { namespace {
         VOLT_DEBUG("Native code generation took %f seconds", t.elapsed());
 
         // Dump optimized LLVM IR
-        dumpModule(m_module, "Optimized");
+        dumpFn(fn, "Optimized", VOLT_LEVEL_TRACE);
 
         return nativeFunction;
     }

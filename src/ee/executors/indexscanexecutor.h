@@ -75,7 +75,10 @@ public:
         , m_projectionExpressions(NULL)
         , m_searchKeyBackingStore(NULL)
         , m_aggExec(NULL)
-        , m_predFunction(NULL)
+        , m_initialExpressionFn(NULL)
+        , m_skipNullExpressionFn(NULL)
+        , m_endExpressionFn(NULL)
+        , m_postExpressionFn(NULL)
     {}
     ~IndexScanExecutor();
 
@@ -83,6 +86,8 @@ private:
     bool p_init(AbstractPlanNode*,
                 TempTableLimits* limits);
     bool p_execute(const NValueArray &params);
+
+    void compilePredicates();
 
     // Data in this class is arranged roughly in the order it is read for
     // p_execute(). Please don't reshuffle it only in the name of beauty.
@@ -114,7 +119,11 @@ private:
 
     AggregateExecutorBase* m_aggExec;
 
-    PredFunction m_predFunction;
+    // JIT compiled predicate functions
+    PredFunction m_initialExpressionFn;
+    PredFunction m_skipNullExpressionFn;
+    PredFunction m_endExpressionFn;
+    PredFunction m_postExpressionFn;
 };
 
 }

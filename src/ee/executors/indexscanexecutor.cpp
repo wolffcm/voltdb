@@ -82,16 +82,6 @@ bool IndexScanExecutor::p_init(AbstractPlanNode *abstractNode,
     // Create output table based on output schema from the plan
     setTempOutputTable(limits, m_node->getTargetTable()->name());
 
-    // Try to generate code for any post_expressions
-    if (m_node->getPredicate()) {
-        Table* input_table = (m_node->isSubQuery()) ?
-            m_node->getChildren()[0]->getOutputTable():
-            m_node->getTargetTable();
-        m_predFunction = compilePredicate("index_scan_pred",
-                                          input_table->schema(),
-                                          m_node->getPredicate());
-    }
-
     //
     // INLINE PROJECTION
     //
@@ -162,10 +152,39 @@ bool IndexScanExecutor::p_init(AbstractPlanNode *abstractNode,
     m_lookupType = m_node->getLookupType();
     m_sortDirection = m_node->getSortDirection();
 
+    // Try to generate code for any predicates evaluated during the scan
+    compilePredicates();
+
     VOLT_DEBUG("IndexScan: %s.%s\n", targetTable->name().c_str(), tableIndex->getName().c_str());
 
     return true;
 }
+
+void IndexScanExecutor::compilePredicates() {
+    const TupleSchema* schema = m_node->getTargetTable()->schema();
+
+    if (m_node->getInitialExpression()) {
+        m_initialExpressionFn = compilePredicate("index_scan_init_expr",
+                                                 schema,
+                                                 m_node->getInitialExpression());
+    }
+    if (m_node->getSkipNullPredicate()) {
+        m_skipNullExpressionFn = compilePredicate("index_scan_skip_null_expr",
+                                                  schema,
+                                                  m_node->getSkipNullPredicate());
+    }
+    if (m_node->getEndExpression()) {
+        m_endExpressionFn = compilePredicate("index_end_expr",
+                                             schema,
+                                             m_node->getEndExpression());
+    }
+    if (m_node->getPredicate()) {
+        m_postExpressionFn = compilePredicate("index_post_expr",
+                                              schema,
+                                              m_node->getPredicate());
+    }
+}
+
 
 bool IndexScanExecutor::p_execute(const NValueArray &params)
 {
@@ -360,10 +379,20 @@ bool IndexScanExecutor::p_execute(const NValueArray &params)
             } else {
                 while (!(tuple = tableIndex->nextValue(indexCursor)).isNullTuple()) {
                     pmp.countdownProgress();
-                    if (initial_expression != NULL && !initial_expression->eval(&tuple, NULL).isTrue()) {
-                        // just passed the first failed entry, so move 2 backward
-                        tableIndex->moveToBeforePriorEntry(indexCursor);
-                        break;
+                    if (initial_expression != NULL) {
+                        bool answer;
+                        if (m_initialExpressionFn) {
+                            answer = (m_initialExpressionFn(tuple.address()) == 0x1);
+                        }
+                        else {
+                            answer = initial_expression->eval(&tuple, NULL).isTrue();
+                        }
+
+                        if (!answer) {
+                            // just passed the first failed entry, so move 2 backward
+                            tableIndex->moveToBeforePriorEntry(indexCursor);
+                            break;
+                        }
                     }
                 }
                 if (tuple.isNullTuple()) {
@@ -401,7 +430,13 @@ bool IndexScanExecutor::p_execute(const NValueArray &params)
         // First check to eliminate the null index rows for UNDERFLOW case only
         //
         if (skipNullExpr != NULL) {
-            if (skipNullExpr->eval(&tuple, NULL).isTrue()) {
+            bool answer;
+            if (m_skipNullExpressionFn)
+                answer = (m_skipNullExpressionFn(tuple.address()) == 0x1);
+            else
+                answer = skipNullExpr->eval(&tuple, NULL).isTrue();
+
+            if (answer) {
                 VOLT_DEBUG("Index scan: find out null rows or columns.");
                 continue;
             } else {
@@ -411,18 +446,29 @@ bool IndexScanExecutor::p_execute(const NValueArray &params)
         //
         // First check whether the end_expression is now false
         //
-        if (end_expression != NULL && !end_expression->eval(&tuple, NULL).isTrue()) {
-            VOLT_TRACE("End Expression evaluated to false, stopping scan");
-            break;
+        if (end_expression != NULL) {
+            bool answer;
+
+            if (m_endExpressionFn) {
+                answer = (m_endExpressionFn(tuple.address()) == 0x1);
+            }
+            else {
+                answer = end_expression->eval(&tuple, NULL).isTrue();
+            }
+
+            if (! answer) {
+                VOLT_TRACE("End Expression evaluated to false, stopping scan");
+                break;
+            }
         }
         //
         // Then apply our post-predicate to do further filtering
         //
         bool no_post_expr_or_true;
         if (post_expression != NULL) {
-            if (m_predFunction) {
+            if (m_postExpressionFn) {
                 // call the native-code function we generated in p_init.
-                no_post_expr_or_true = (m_predFunction(tuple.address()) == 0x1);
+                no_post_expr_or_true = (m_postExpressionFn(tuple.address()) == 0x1);
             }
             else {
                 no_post_expr_or_true = post_expression->eval(&tuple, NULL).isTrue();

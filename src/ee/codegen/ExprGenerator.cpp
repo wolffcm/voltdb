@@ -14,14 +14,14 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with VoltDB.  If not, see <http://www.gnu.org/licenses/>.
  */
+
 // Uncomment this to get informative debug messages
 // regarding codegen
 //
-#ifdef VOLT_LOG_LEVEL
-#undef VOLT_LOG_LEVEL
-#endif
-
-#define VOLT_LOG_LEVEL VOLT_LEVEL_TRACE
+// #ifdef VOLT_LOG_LEVEL
+// #undef VOLT_LOG_LEVEL
+// #endif
+// #define VOLT_LOG_LEVEL VOLT_LEVEL_TRACE
 
 #include "ExprGenerator.hpp"
 
@@ -577,6 +577,8 @@ namespace voltdb {
         resultBlock->moveAfter(builder().GetInsertBlock());
         CGValue left = codegenExpr(tupleSchema,
                                    expr->getLeft());
+        assert(left.val()->getType() == builder().getInt8Ty());
+        left.val()->setName("and_lhs_val");
         llvm::BasicBlock *lhsFalseLabel = getEmptyBasicBlock("and_lhs_false", resultBlock);
         llvm::BasicBlock *lhsNotFalseLabel = getEmptyBasicBlock("and_lhs_not_false", resultBlock);
         llvm::Value* lhsFalseCmp = builder().CreateICmpEQ(left.val(), getFalseValue());
@@ -589,10 +591,12 @@ namespace voltdb {
         builder().SetInsertPoint(lhsNotFalseLabel);
         CGValue right = codegenExpr(tupleSchema,
                                     expr->getRight());
+        assert(right.val()->getType() == builder().getInt8Ty());
+        right.val()->setName("and_rhs_val");
         if (! left.mayBeNull()) {
             // lhs cannot be null, so it must be true.
             // Answer is whatever rhs is.
-            results.push_back(std::make_pair(right.val(), lhsNotFalseLabel));
+            results.push_back(std::make_pair(right.val(), builder().GetInsertBlock()));
             builder().CreateBr(resultBlock);
         }
         else {
@@ -727,6 +731,7 @@ namespace voltdb {
 
         std::vector<ValueBB>::iterator it = results.begin();
         for(; it != results.end(); ++it) {
+            assert(it->first->getType() == builder().getInt8Ty());
             phi->addIncoming(it->first, it->second);
         }
 
