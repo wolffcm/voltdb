@@ -493,7 +493,7 @@ namespace voltdb { namespace {
                 llvm::LLVMContext &ctx = getLlvmContext();
 
                 if (isTrivialScan(node)) {
-                    VOLT_DEBUG("Creating trivial function for scan which does nothing");
+                    VOLT_TRACE("Creating trivial function for scan which does nothing");
                     llvm::Value* retValue = llvm::ConstantInt::get(llvm::Type::getInt8Ty(ctx), 1);
                     builder().CreateRet(retValue);
                     return;
@@ -783,7 +783,7 @@ namespace voltdb { namespace {
     PlanNodeFunction
     CodegenContextImpl::compilePlanNode(AbstractExecutor *executor) {
         AbstractPlanNode *node = executor->getPlanNode();
-        VOLT_DEBUG("Attempting to compile plan node:\n%s", node->debug().c_str());
+        VOLT_DEBUG("Attempting to compile plan node: %s", node->debug().c_str());
         PlanNodeFnCtx planNodeFnCtx(this, executor);
         planNodeFnCtx.init(node);
         boost::timer t;
