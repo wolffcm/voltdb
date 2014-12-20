@@ -301,30 +301,6 @@ namespace voltdb { namespace {
         return fn;
     }
 
-    llvm::Type*
-    CodegenContextImpl::getLlvmType(ValueType voltType) {
-        llvm::LLVMContext &ctx = *m_llvmContext;
-        switch (voltType) {
-        case VALUE_TYPE_TINYINT:
-            return llvm::Type::getInt8Ty(ctx);
-        case VALUE_TYPE_SMALLINT:
-            return llvm::Type::getInt16Ty(ctx);
-        case VALUE_TYPE_INTEGER:
-            return llvm::Type::getInt32Ty(ctx);
-        case VALUE_TYPE_BIGINT:
-            return llvm::Type::getInt64Ty(ctx);
-        case VALUE_TYPE_TIMESTAMP:
-            return llvm::Type::getInt64Ty(ctx);
-        case VALUE_TYPE_BOOLEAN:
-            return llvm::Type::getInt8Ty(ctx);
-        default: {
-            std::ostringstream oss;
-            oss << "expression with type " << valueToString(voltType);
-            throw UnsupportedForCodegenException(oss.str());
-        }
-        }
-    }
-
     llvm::IntegerType* CodegenContextImpl::getIntPtrType() {
         return m_executionEngine->getDataLayout()->getIntPtrType(*m_llvmContext);
     }
@@ -342,7 +318,9 @@ namespace voltdb { namespace {
     llvm::Value* CodegenContextImpl::getColumnOffset(const TupleSchema* schema, int columnId) {
         const TupleSchema::ColumnInfo *columnInfo = schema->getColumnInfo(columnId);
         uint32_t intOffset = TUPLE_HEADER_SIZE + columnInfo->offset;
-        llvm::Value* offset = llvm::ConstantInt::get(getLlvmType(VALUE_TYPE_INTEGER), intOffset);
+        llvm::Type* indexType = ExprGenerator::getLlvmType(*m_llvmContext, VALUE_TYPE_INTEGER);
+
+        llvm::Value* offset = llvm::ConstantInt::get(indexType, intOffset);
         return offset;
     }
 

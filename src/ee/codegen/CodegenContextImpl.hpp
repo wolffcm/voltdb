@@ -58,8 +58,6 @@ namespace voltdb {
         llvm::Module* getModule();
         llvm::LLVMContext& getLlvmContext();
 
-        llvm::Type* getLlvmType(ValueType voltType);
-
         // returns an llvm integer type that can store a pointer on
         // the jit's target
         llvm::IntegerType* getIntPtrType();

@@ -142,15 +142,8 @@ namespace voltdb {
                                   cgVal.val(),
                                   cgVal.getInlinedVarcharTotalLength(builder()));
         }
-        else if (cgVal.isOutlinedVarchar()) {
-            // Just copy the StringRef* into the field.
-            llvm::Type* ptrToPtrTy = getPtrToPtrToStringRefType(ctx);
-
-            addressInTupleStorage = builder().CreateBitCast(addressInTupleStorage, ptrToPtrTy);
-            builder().CreateStore(cgVal.val(), addressInTupleStorage);
-        }
         else {
-            llvm::Type* elemTy = m_codegenContext->getLlvmType(cgVal.ty());
+            llvm::Type* elemTy = ExprGenerator::getLlvmType(ctx, cgVal.ty());
             llvm::Type* ptrTy = llvm::PointerType::getUnqual(elemTy);
             llvm::Value* castedAddr = builder().CreateBitCast(addressInTupleStorage, ptrTy);
             builder().CreateStore(cgVal.val(), castedAddr);

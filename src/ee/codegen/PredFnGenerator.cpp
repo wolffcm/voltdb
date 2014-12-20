@@ -49,7 +49,7 @@ namespace voltdb {
         llvm::LLVMContext &ctx = getLlvmContext();
 
         std::vector<llvm::Type*> argType(1, llvm::Type::getInt8PtrTy(ctx));
-        llvm::Type* retType = getLlvmType(returnTy);
+        llvm::Type* retType = ExprGenerator::getLlvmType(ctx, returnTy);
         llvm::FunctionType* ft = llvm::FunctionType::get(retType, argType, false);
         m_function = llvm::Function::Create(ft,
                                             llvm::Function::ExternalLinkage,
@@ -73,9 +73,5 @@ namespace voltdb {
 
     llvm::IRBuilder<>& PredFnGenerator::builder() {
         return *m_builder;
-    }
-
-    llvm::Type* PredFnGenerator::getLlvmType(ValueType voltType) {
-        return m_codegenContext->getLlvmType(voltType);
     }
 }

@@ -54,11 +54,11 @@ namespace voltdb {
 
         llvm::Value* getTupleArg();
 
-        llvm::LLVMContext& getLlvmContext();
-
         llvm::IRBuilder<>& builder();
 
         llvm::Type* getLlvmType(ValueType voltType);
+
+        llvm::LLVMContext& getLlvmContext();
 
         CodegenContextImpl* m_codegenContext;
         llvm::Function* m_function;

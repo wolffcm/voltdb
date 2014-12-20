@@ -131,12 +131,12 @@ namespace voltdb {
         codegenExpr(const TupleSchema* tupleSchema,
                     const AbstractExpression* expr);
 
+        static llvm::Type* getLlvmType(llvm::LLVMContext& ctx,
+                                       const CGVoltType& voltType);
     private:
 
         llvm::IRBuilder<>& builder();
         llvm::LLVMContext& getLlvmContext();
-        //llvm::Type* getLlvmType(ValueType voltType, bool isInlined);
-        llvm::Type* getLlvmType(const CGVoltType& voltType);
         llvm::Type* getIntPtrType();
         llvm::Value* getTupleArg();
         llvm::Value* getTrueValue();

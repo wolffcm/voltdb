@@ -257,16 +257,33 @@ namespace voltdb {
         return *m_builder;
     }
 
-    llvm::Type* ExprGenerator::getLlvmType(const CGVoltType& cgVoltType) {
-        if (cgVoltType.isInlinedVarchar()) {
-
-            return llvm::Type::getInt8Ty(m_codegenContext->getLlvmContext());
-        } else if (cgVoltType.isOutlinedVarchar()) {
-            return getPtrToStringRefType(getLlvmContext());
-
+    llvm::Type* ExprGenerator::getLlvmType(llvm::LLVMContext& ctx,
+                                           const CGVoltType& cgVoltType) {
+        switch (cgVoltType.ty()) {
+        case VALUE_TYPE_TINYINT:
+            return llvm::Type::getInt8Ty(ctx);
+        case VALUE_TYPE_SMALLINT:
+            return llvm::Type::getInt16Ty(ctx);
+        case VALUE_TYPE_INTEGER:
+            return llvm::Type::getInt32Ty(ctx);
+        case VALUE_TYPE_BIGINT:
+            return llvm::Type::getInt64Ty(ctx);
+        case VALUE_TYPE_TIMESTAMP:
+            return llvm::Type::getInt64Ty(ctx);
+        case VALUE_TYPE_BOOLEAN:
+            return llvm::Type::getInt8Ty(ctx);
+        case VALUE_TYPE_VARCHAR:
+        case VALUE_TYPE_VARBINARY:
+            if (cgVoltType.isInlined())
+                return llvm::Type::getInt8Ty(ctx);
+            else
+                return getPtrToStringRefType(ctx);
+        default: {
+            std::ostringstream oss;
+            oss << "expression with type " << valueToString(cgVoltType.ty());
+            throw UnsupportedForCodegenException(oss.str());
         }
-
-        return m_codegenContext->getLlvmType(cgVoltType.ty());
+        }
     }
 
     llvm::Value* ExprGenerator::getTupleArg() {
@@ -284,6 +301,7 @@ namespace voltdb {
     CGValue
     ExprGenerator::codegenParameterValueExpr(const TupleSchema*,
                                              const ParameterValueExpression* expr) {
+        llvm::LLVMContext& ctx = getLlvmContext();
         VOLT_TRACE("Entering");
         const NValue* paramValue = expr->getParamValue();
         // I have a theory that parameters and constants are never
@@ -291,7 +309,7 @@ namespace voltdb {
         // with them.  But is my theory true???
         assert(paramValue->getSourceInlined() == false);
 
-        llvm::PointerType* ptrTy = llvm::PointerType::getUnqual(getLlvmType(getExprType(expr)));
+        llvm::PointerType* ptrTy = llvm::PointerType::getUnqual(getLlvmType(ctx, getExprType(expr)));
         llvm::Constant* nvalueAddrAsInt = llvm::ConstantInt::get(getIntPtrType(),
                                                                  (uintptr_t)paramValue);
         llvm::Value* castedAddr = builder().CreateIntToPtr(nvalueAddrAsInt, ptrTy);
@@ -305,11 +323,12 @@ namespace voltdb {
     CGValue
     ExprGenerator::codegenTupleValueExpr(const TupleSchema* schema,
                                          const TupleValueExpression* expr) {
+        llvm::LLVMContext& ctx = getLlvmContext();
         VOLT_TRACE("Entering");
         // find the offset of the field in the record
         const TupleSchema::ColumnInfo *columnInfo = schema->getColumnInfo(expr->getColumnId());
         uint32_t intOffset = TUPLE_HEADER_SIZE + columnInfo->offset;
-        llvm::Value* offset = llvm::ConstantInt::get(getLlvmType(VALUE_TYPE_INTEGER), intOffset);
+        llvm::Value* offset = llvm::ConstantInt::get(getLlvmType(ctx, VALUE_TYPE_INTEGER), intOffset);
 
         // emit instruction that computes the address of the value
         // GEP is getelementptr, which amounts here to a pointer add.
@@ -321,25 +340,11 @@ namespace voltdb {
         if (cgVoltType.isInlinedVarchar()) {
             VOLT_TRACE("Exiting---inlined varchar");
             // just leave it as a pointer to char!
-            return CGValue(addr, columnInfo->allowNull, cgVoltType);
-        }
-        else if (cgVoltType.isOutlinedVarchar()) {
 
-            llvm::LLVMContext &ctx = addr->getContext();
-
-            // cast addr (char*) to StringRef**, which we're modeling as char**.
-            llvm::StructType* stringRefTy = getStringRefType(ctx);
-            llvm::Type* ptrToStringRef = llvm::PointerType::getUnqual(stringRefTy);
-            llvm::Type* ptrToPtrToStringRef = llvm::PointerType::getUnqual(ptrToStringRef);
-            addr = builder().CreateBitCast(addr, ptrToPtrToStringRef);
-            addr = builder().CreateLoad(addr);
-            assert(addr->getType() == ptrToStringRef);
-
-            VOLT_TRACE("Exiting---outlined varchar");
             return CGValue(addr, columnInfo->allowNull, cgVoltType);
         }
 
-        llvm::Type* ptrTy = llvm::PointerType::getUnqual(getLlvmType(cgVoltType));
+        llvm::Type* ptrTy = llvm::PointerType::getUnqual(getLlvmType(ctx, cgVoltType));
         llvm::Value* castedAddr = builder().CreateBitCast(addr,
                                                           ptrTy);
         std::ostringstream varName;
@@ -491,17 +496,17 @@ namespace voltdb {
 
         // LLVM icmp and fcmp instructions produce a 1-bit integer
         // Zero-extend to 8 bits.
-        return builder().CreateZExt(cmp, getLlvmType(outputType));
+        return builder().CreateZExt(cmp, getLlvmType(getLlvmContext(), outputType));
     }
 
     llvm::Value*
     ExprGenerator::getTrueValue() {
-        return llvm::ConstantInt::get(getLlvmType(VALUE_TYPE_BOOLEAN), 1);
+        return llvm::ConstantInt::get(getLlvmType(getLlvmContext(), VALUE_TYPE_BOOLEAN), 1);
     }
 
     llvm::Value*
     ExprGenerator::getFalseValue() {
-        return llvm::ConstantInt::get(getLlvmType(VALUE_TYPE_BOOLEAN), 0);
+        return llvm::ConstantInt::get(getLlvmType(getLlvmContext(), VALUE_TYPE_BOOLEAN), 0);
     }
 
     llvm::Value*
@@ -625,14 +630,15 @@ namespace voltdb {
 
             // rhs is not false, so result is unknown
             builder().SetInsertPoint(rhsNotFalseLabel);
-            results.push_back(std::make_pair(getNullValueForType(getLlvmType(getExprType(expr))),
+            results.push_back(std::make_pair(getNullValueForType(getLlvmType(getLlvmContext(),
+                                                                             getExprType(expr))),
                                              rhsNotFalseLabel));
             builder().CreateBr(resultBlock);
         }
 
         builder().SetInsertPoint(resultBlock);
 
-        llvm::PHINode* phi = builder().CreatePHI(getLlvmType(getExprType(expr)), 3);
+        llvm::PHINode* phi = builder().CreatePHI(getLlvmType(getLlvmContext(), getExprType(expr)), 3);
 
         std::vector<ValueBB>::iterator it = results.begin();
         for(; it != results.end(); ++it) {
@@ -693,7 +699,7 @@ namespace voltdb {
             builder().CreateCondBr(cmp, lhsIsNull, lhsNotNull);
 
             builder().SetInsertPoint(lhsIsNull);
-            results.push_back(std::make_pair(getNullValueForType(getLlvmType(VALUE_TYPE_BOOLEAN)),
+            results.push_back(std::make_pair(getNullValueForType(builder().getInt8Ty()),
                                              lhsIsNull));
             builder().CreateBr(resultBlock);
 
@@ -709,7 +715,7 @@ namespace voltdb {
             builder().CreateCondBr(cmp, rhsIsNull, rhsNotNull);
 
             builder().SetInsertPoint(rhsIsNull);
-            results.push_back(std::make_pair(getNullValueForType(getLlvmType(VALUE_TYPE_BOOLEAN)),
+            results.push_back(std::make_pair(getNullValueForType(builder().getInt8Ty()),
                                              rhsIsNull));
             builder().CreateBr(resultBlock);
 
@@ -727,7 +733,7 @@ namespace voltdb {
         builder().CreateBr(resultBlock);
 
         builder().SetInsertPoint(resultBlock);
-        llvm::PHINode* phi = builder().CreatePHI(getLlvmType(getExprType(expr)), 3);
+        llvm::PHINode* phi = builder().CreatePHI(getLlvmType(getLlvmContext(), getExprType(expr)), 3);
 
         std::vector<ValueBB>::iterator it = results.begin();
         for(; it != results.end(); ++it) {
@@ -751,7 +757,7 @@ namespace voltdb {
         }
 
         llvm::Value* cmp = compareToNull(child);
-        return CGValue(builder().CreateZExt(cmp, getLlvmType(VALUE_TYPE_BOOLEAN)),
+        return CGValue(builder().CreateZExt(cmp, builder().getInt8Ty()),
                        false, VALUE_TYPE_BOOLEAN); // result will never be null
     }
 
@@ -765,7 +771,7 @@ namespace voltdb {
         assert(nval.getSourceInlined() == false);
 
         ValueType vt = ValuePeeker::peekValueType(nval);
-        llvm::Type* ty = getLlvmType(vt);
+        llvm::Type* ty = getLlvmType(getLlvmContext(), vt);
         if (nval.isNull()) {
             return CGValue(getNullValueForType(ty),
                            true, vt);
