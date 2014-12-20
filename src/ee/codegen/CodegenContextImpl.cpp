@@ -26,6 +26,7 @@
 
 #include "codegen/CodegenContextImpl.hpp"
 #include "codegen/ExprGenerator.hpp"
+#include "codegen/PredFnGenerator.hpp"
 #include "common/SQLException.h"
 #include "common/TupleSchema.h"
 #include "common/debuglog.h"
@@ -110,95 +111,7 @@ namespace voltdb {
                 return expr->getValueType();
             }
         }
-
-
-
-    namespace {
-
-        // maintains the current state of the LLVM function being generated
-        class PredFnCtx {
-        public:
-            // Create a function context for a function that
-            //   accepts a pointer to a tuple
-            //   returns a boolean
-            //   has external linkage (can be called from outside llvm module)
-            PredFnCtx(CodegenContextImpl* codegenContext, const std::string& name)
-                : m_codegenContext(codegenContext)
-                , m_function(NULL)
-                , m_builder()
-            {
-                init(name, llvm::Function::ExternalLinkage, VALUE_TYPE_BOOLEAN);
-            }
-
-            void codegen(const TupleSchema* tupleSchema,
-                         const AbstractExpression* expr) {
-                ExprGenerator generator(m_codegenContext, m_function, m_builder.get(), getTupleArg());
-                llvm::Value* answer = generator.codegenExpr(tupleSchema, expr).val();
-                builder().CreateRet(answer);
-            }
-
-            llvm::Function* getFunction() {
-                return m_function;
-            }
-
-        private:
-
-            // alternate constructor to allow creating function with
-            // internal linkage (can only be called from other LLVM
-            // functions)
-            PredFnCtx(CodegenContextImpl* codegenContext,
-                  const std::string& name,
-                  llvm::Function::LinkageTypes linkage,
-                  ValueType returnTy)
-                : m_codegenContext(codegenContext)
-                , m_function(NULL)
-                , m_builder()
-            {
-                init(name, linkage, returnTy);
-            }
-
-            void init(const std::string& name,
-                      llvm::Function::LinkageTypes linkage,
-                      ValueType returnTy) {
-                llvm::LLVMContext &ctx = getLlvmContext();
-
-                std::vector<llvm::Type*> argType(1, llvm::Type::getInt8PtrTy(ctx));
-                llvm::Type* retType = getLlvmType(returnTy);
-                llvm::FunctionType* ft = llvm::FunctionType::get(retType, argType, false);
-                m_function = llvm::Function::Create(ft,
-                                                    linkage,
-                                                    name,
-                                                    m_codegenContext->getModule());
-
-                m_function->arg_begin()->setName("tuple");
-
-                llvm::BasicBlock *bb = llvm::BasicBlock::Create(ctx, "entry", m_function);
-                m_builder.reset(new llvm::IRBuilder<>(bb));
-            }
-
-            llvm::Value* getTupleArg() {
-                return m_function->arg_begin();
-            }
-
-            llvm::LLVMContext& getLlvmContext() {
-                return m_codegenContext->getLlvmContext();
-            }
-
-
-            llvm::IRBuilder<>& builder() {
-                return *m_builder;
-            }
-
-            llvm::Type* getLlvmType(ValueType voltType) {
-                return m_codegenContext->getLlvmType(voltType);
-            }
-
-            CodegenContextImpl* m_codegenContext;
-            llvm::Function* m_function;
-            boost::scoped_ptr<llvm::IRBuilder<> > m_builder;
-        };
-
-    }}
+} // end namespace voltdb
 
 extern "C" {
     // These are C wrappers for functions called from
@@ -261,7 +174,7 @@ extern "C" {
         VOLT_TRACE("  Here's a number: %ld", i64Num);
         VOLT_TRACE("  Here's a size_t as a signed number: %ld", data);
     }
-}
+} // end extern "C" definitions
 
 namespace voltdb { namespace {
 
@@ -763,23 +676,23 @@ namespace voltdb { namespace {
                                      const TupleSchema* tupleSchema,
                                      const AbstractExpression* expr) {
         VOLT_TRACE("Attempting to compile predicate:\n%s", expr->debug(true).c_str());
-        PredFnCtx predFnCtx(this, fnName);
+        PredFnGenerator predFnGenerator(this, fnName);
         boost::timer t;
 
         try {
             t.restart();
-            predFnCtx.codegen(tupleSchema, expr);
+            predFnGenerator.codegen(tupleSchema, expr);
             VOLT_DEBUG("Predicate IR construction took %f seconds", t.elapsed());
         }
         catch (UnsupportedForCodegenException& ex) {
-            predFnCtx.getFunction()->eraseFromParent();
+            predFnGenerator.getFunction()->eraseFromParent();
             VOLT_DEBUG("Aborted compilation: %s", ex.getMessage().c_str());
 
             // EE will fall back to interpreting function
             return NULL;
         }
 
-        return (PredFunction)generateCode(predFnCtx.getFunction());
+        return (PredFunction)generateCode(predFnGenerator.getFunction());
     }
 
     PlanNodeFunction

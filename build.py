@@ -192,6 +192,7 @@ CTX.INPUT['codegen'] = """
  CodegenContext.cpp
  CodegenContextImpl.cpp
  ExprGenerator.cpp
+ PredFnGenerator.cpp
 """
 
 CTX.INPUT['common'] = """
