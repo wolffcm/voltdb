@@ -81,7 +81,7 @@ if CTX.PROFILE:
 # this is where the build will look for header files
 # - the test source will also automatically look in the test root dir
 CTX.INCLUDE_DIRS = ['src/ee']
-CTX.SYSTEM_DIRS = ['third_party/cpp']
+CTX.SYSTEM_DIRS = ['third_party/cpp', getLlvmIncludeDir()]
 
 # don't worry about checking for changes in header files in the following
 #  directories

@@ -123,7 +123,10 @@ def buildMakefile(CTX):
     CPPFLAGS = " ".join(CTX.CPPFLAGS.split())
     MAKECPPFLAGS = CPPFLAGS
     for dir in CTX.SYSTEM_DIRS:
-        MAKECPPFLAGS += " -isystem ../../%s" % (dir)
+        if dir[0] != '/':
+            MAKECPPFLAGS += " -isystem ../../%s" % (dir)
+        else:
+            MAKECPPFLAGS += " -isystem %s" % (dir)
     for dir in CTX.INCLUDE_DIRS:
         MAKECPPFLAGS += " -I../../%s" % (dir)
     MAKECPPFLAGS += " -I%s" % (getLlvmIncludeDir())

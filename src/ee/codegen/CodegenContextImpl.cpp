@@ -46,6 +46,7 @@
 #include "llvm/ExecutionEngine/JIT.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
@@ -64,7 +65,7 @@ static void initializeNativeTarget() {
     bool success = llvm::llvm_start_multithreaded();
     (void)success;
     assert(success);
-    (void)llvm::InitializeNativeTarget();
+    llvm::InitializeNativeTarget();
 }
 
 namespace voltdb {
@@ -258,7 +259,7 @@ extern "C" {
     void codegen_debug_size(size_t i64Num, size_t data) {
         VOLT_TRACE("---");
         VOLT_TRACE("  Here's a number: %ld", i64Num);
-        VOLT_TRACE("  Here's a pointer: %ld", data);
+        VOLT_TRACE("  Here's a size_t as a signed number: %ld", data);
     }
 }
 
@@ -500,7 +501,7 @@ namespace voltdb { namespace {
                 }
 
                 ProjectionPlanNode* projNode = static_cast<ProjectionPlanNode*>(node->getInlinePlanNode(PLAN_NODE_TYPE_PROJECTION));
-                int numInlinedNodes = node->getInlinePlanNodes().size();
+                std::map<PlanNodeType, AbstractPlanNode*>::size_type numInlinedNodes = node->getInlinePlanNodes().size();
                 if (numInlinedNodes > 1 || (projNode == NULL && numInlinedNodes > 0)) {
                     throw UnsupportedForCodegenException("limit or agg inlined in scan");
                 }
@@ -711,12 +712,13 @@ namespace voltdb { namespace {
         return m_executionEngine->getDataLayout()->getIntPtrType(*m_llvmContext);
     }
 
-    static void dumpFn(llvm::Function* fn, const std::string& desc, int forLogLevel) {
+    template<typename T>
+    static void dumpObj(T* obj, const std::string& desc, int forLogLevel) {
         if (VOLT_LOG_LEVEL <= forLogLevel) {
             std::string irDump;
             llvm::raw_string_ostream rso(irDump);
-            fn->print(rso, NULL);
-            VOLT_DEBUG("%s LLVM IR in module: \n%s", desc.c_str(), irDump.c_str());
+            obj->print(rso, NULL);
+            VOLT_DEBUG("%s LLVM IR: \n%s", desc.c_str(), irDump.c_str());
         }
     }
 
@@ -733,7 +735,7 @@ namespace voltdb { namespace {
         boost::timer t;
 
         // Dump the unoptimized fn
-        dumpFn(fn, "Unoptimized", VOLT_LEVEL_DEBUG);
+        dumpObj(fn, "Unoptimized", VOLT_LEVEL_DEBUG);
 
         // This will throw an exception if we did anything wonky in LLVM IR
         t.restart();
@@ -751,7 +753,7 @@ namespace voltdb { namespace {
         VOLT_DEBUG("Native code generation took %f seconds", t.elapsed());
 
         // Dump optimized LLVM IR
-        dumpFn(fn, "Optimized", VOLT_LEVEL_TRACE);
+        dumpObj(fn, "Optimized", VOLT_LEVEL_TRACE);
 
         return nativeFunction;
     }
