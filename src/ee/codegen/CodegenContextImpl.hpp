@@ -113,6 +113,7 @@ namespace voltdb {
     llvm::StructType* getStringRefType(llvm::LLVMContext &ctx);
     llvm::PointerType* getPtrToStringRefType(llvm::LLVMContext &ctx);
     llvm::PointerType* getPtrToPtrToStringRefType(llvm::LLVMContext &ctx);
+    llvm::StructType* getTableTupleType(llvm::LLVMContext &ctx);
 
     // Works with llvm::Value and llvm::Type
     template<typename T>
