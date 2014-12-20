@@ -231,7 +231,7 @@ namespace voltdb { namespace {
                                         NULL);
         }
 
-    }
+    } // end anonymous namespace
 
     CodegenContextImpl::CodegenContextImpl()
         : m_llvmContext()
@@ -268,8 +268,6 @@ namespace voltdb { namespace {
         m_passManager.reset(new llvm::FunctionPassManager(m_module));
 
         m_passManager->add(new llvm::DataLayout(*m_executionEngine->getDataLayout()));
-
-        //m_passManager->add(llvm::createFunctionInliningPass());
 
         // Do simple "peephole" optimizations and bit-twiddling optzns.
         m_passManager->add(llvm::createInstructionCombiningPass());

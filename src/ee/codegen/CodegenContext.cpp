@@ -24,6 +24,7 @@ namespace voltdb {
         : m_impl(new CodegenContextImpl())
     {
     }
+
     CodegenContext::~CodegenContext() {
     }
 

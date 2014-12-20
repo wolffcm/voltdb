@@ -114,7 +114,7 @@ namespace voltdb {
     // A value that points to a TableTuple object.  return a
     // pointer to its backing storage.
     llvm::Value* PlanNodeFnGenerator::getTupleStorage(llvm::Value* tuple, const std::string& name) {
-        assert(tuple->getType() == llvm::PointerType::getUnqual(tableTupleType(tuple->getContext())));
+        assert(tuple->getType() == llvm::PointerType::getUnqual(getTableTupleType(tuple->getContext())));
 
         llvm::Value* storage = builder().CreateConstGEP2_32(tuple, 0, 1);
         storage = builder().CreateLoad(storage, name);
@@ -126,7 +126,7 @@ namespace voltdb {
     // Given a reference to a table tuple, return the address of the
     // pointer to the schema
     llvm::Value* PlanNodeFnGenerator::getTableTupleSchemaAddress(llvm::Value* tableTuple) {
-        assert(tableTuple->getType() == llvm::PointerType::getUnqual(tableTupleType(tableTuple->getContext())));
+        assert(tableTuple->getType() == llvm::PointerType::getUnqual(getTableTupleType(tableTuple->getContext())));
         return builder().CreateConstGEP2_32(tableTuple, 0, 0);
     }
 
