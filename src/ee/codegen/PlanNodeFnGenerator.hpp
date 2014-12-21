@@ -48,6 +48,7 @@ namespace voltdb {
         llvm::Function* getFunction() const;
 
         static void addExternalPrototypes(llvm::Module* module);
+        static void createOpaqueTypes(CodegenContextImpl* cgCtx);
 
     private:
         llvm::Value* getInputTable();

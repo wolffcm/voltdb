@@ -24,6 +24,7 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include <map>
 #include <string>
 #include <sstream>
 
@@ -37,6 +38,7 @@ class Module;
 class Value;
 class Type;
 class IntegerType;
+class StructType;
 }
 
 namespace voltdb {
@@ -66,6 +68,8 @@ namespace voltdb {
 
         llvm::Function* getFunction(const std::string& fnName);
 
+        void registerExternalTy(const std::string& typeName);
+
         ~CodegenContextImpl();
 
         static void shutdownLlvm();
@@ -80,6 +84,8 @@ namespace voltdb {
         boost::scoped_ptr<llvm::legacy::FunctionPassManager> m_passManager;
 
         std::string m_errorString;
+
+        std::map<std::string, llvm::StructType*> m_externalTypesMap;
    };
 
     // This is thrown if we encounter something we can't yet generate

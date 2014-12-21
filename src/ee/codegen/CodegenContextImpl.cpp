@@ -170,6 +170,7 @@ namespace voltdb { namespace {
         , m_executionEngine()
         , m_passManager()
         , m_errorString()
+        , m_externalTypesMap()
     {
         // This really only needs to be called once for the whole process.
         (void) pthread_once(&llvmNativeTargetInitialized, initializeNativeTarget);
@@ -210,6 +211,12 @@ namespace voltdb { namespace {
         m_passManager->add(llvm::createCFGSimplificationPass());
 
         m_passManager->doInitialization();
+    }
+
+    void CodegenContextImpl::registerExternalTy(const std::string& typeName) {
+        llvm::StructType *ty = llvm::StructType::create(getLlvmContext(),
+                                                        typeName);
+        m_externalTypesMap[typeName] = ty;
     }
 
     CodegenContextImpl::~CodegenContextImpl() {

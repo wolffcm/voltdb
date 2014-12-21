@@ -62,6 +62,14 @@ extern "C" {
 
 namespace voltdb {
 
+    void PlanNodeFnGenerator::createOpaqueTypes(CodegenContextImpl* cgCtx) {
+
+        cgCtx->registerExternalTy("Table");
+        cgCtx->registerExternalTy("TableIterator");
+        cgCtx->registerExternalTy("TempTable");
+        cgCtx->registerExternalTy("TupleSchema");
+    }
+
     void PlanNodeFnGenerator::addExternalPrototypes(llvm::Module* module) {
             llvm::LLVMContext& ctx = module->getContext();
             llvm::Type* charPtrTy = llvm::Type::getInt8PtrTy(ctx);
