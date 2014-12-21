@@ -197,12 +197,11 @@ namespace voltdb {
         VOLT_TRACE("Entering");
         llvm::LLVMContext& ctx = cgVal.val()->getContext();
         if (cgVal.isInlinedVarchar()) {
-            // Use memcpy
-            llvm::Function* memcpyFn = getExtFn("memcpy");
-            builder().CreateCall3(memcpyFn,
-                                  addressInTupleStorage,
-                                  cgVal.val(),
-                                  cgVal.getInlinedVarcharTotalLength(builder()));
+            builder().CreateMemCpy(addressInTupleStorage,
+                                   cgVal.val(),
+                                   cgVal.getInlinedVarcharTotalLength(builder()),
+                                   1,  // alignment; no aligned
+                                   false); // not volatile
         }
         else {
             llvm::Type* elemTy = ExprGenerator::getLlvmType(ctx, cgVal.ty());

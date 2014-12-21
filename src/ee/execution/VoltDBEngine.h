@@ -377,7 +377,7 @@ class __attribute__((visibility("default"))) VoltDBEngine {
         int64_t tempTableMemoryLimit() const {
             return m_tempTableMemoryLimit;
         }
-     
+
         int64_t tempTableLogLimit() const {
             return (m_tempTableMemoryLimit * 3) / 4;
         }
