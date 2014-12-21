@@ -120,54 +120,9 @@ namespace voltdb {
 } // end namespace voltdb
 
 extern "C" {
+
     // These are C wrappers for functions called from
     // generated code
-
-    voltdb::TableIterator* table_get_iterator(voltdb::Table* table) {
-        return &(table->iteratorDeletingAsWeGo());
-    }
-
-    voltdb::TableTuple* table_temp_tuple(voltdb::Table* table) {
-        return &(table->tempTuple());
-    }
-
-    void table_insert_tuple_nonvirtual(voltdb::TempTable* table, voltdb::TableTuple* tuple) {
-        table->insertTupleNonVirtual(*tuple);
-    }
-
-    const voltdb::TupleSchema* table_schema(voltdb::Table* table) {
-        return table->schema();
-    }
-
-    bool iterator_next(voltdb::TableIterator* iterator, voltdb::TableTuple* tuple) {
-        return iterator->next(*tuple);
-    }
-
-    char* stringref_get(voltdb::StringRef* sr) {
-        return sr->get();
-    }
-
-    void stringref_debug(voltdb::StringRef* sr) {
-#if VOLT_LOG_LEVEL<=VOLT_LEVEL_TRACE
-        if (sr != NULL) {
-            VOLT_TRACE("StringRef addr %p", sr);
-            VOLT_TRACE("StringRef get() %p", sr->get());
-
-            const char mask = ~static_cast<char>(OBJECT_NULL_BIT | OBJECT_CONTINUATION_BIT);
-
-            char *data = sr->get();
-            char contBit = data[0] & OBJECT_CONTINUATION_BIT;
-            VOLT_TRACE("  data[0] & OBJECT_CONTINUATION_BIT: %d", contBit);
-            char nullBit = data[0] & OBJECT_NULL_BIT;
-            VOLT_TRACE("  data[0] & OBJECT_NULL_BIT: %d", nullBit);
-            char shortDataSize = data[0] & mask;
-            VOLT_TRACE("  shortDataSize: %d", shortDataSize);
-        }
-        else {
-            VOLT_TRACE("StringRef is NULL");
-        }
-#endif
-    }
 
     void codegen_debug_ptr(size_t i64Num, void* ptr) {
         VOLT_TRACE("---");
@@ -186,44 +141,20 @@ namespace voltdb { namespace {
 
         // Add the extern "C" functions above to the module
         void addPrototypes(llvm::Module* module) {
+
+            PlanNodeFnGenerator::addExternalPrototypes(module);
+            ExprGenerator::addExternalPrototypes(module);
+
             llvm::LLVMContext& ctx = module->getContext();
             llvm::Type* charPtrTy = llvm::Type::getInt8PtrTy(ctx);
-            llvm::Type* boolTy = llvm::Type::getInt8Ty(ctx);
             llvm::Type* voidTy = llvm::Type::getVoidTy(ctx);
-            llvm::Type* ptrToTupleTy = llvm::PointerType::getUnqual(getTableTupleType(ctx));
 
-            module->getOrInsertFunction("table_get_iterator", charPtrTy, charPtrTy, NULL);
-            module->getOrInsertFunction("table_temp_tuple", ptrToTupleTy, charPtrTy, NULL);
-            module->getOrInsertFunction("table_insert_tuple_nonvirtual", voidTy, charPtrTy, ptrToTupleTy, NULL);
-            module->getOrInsertFunction("table_schema", charPtrTy, charPtrTy, NULL);
-
-            module->getOrInsertFunction("iterator_next", boolTy, charPtrTy, ptrToTupleTy, NULL);
-
-            module->getOrInsertFunction("stringref_get", charPtrTy, getPtrToStringRefType(ctx), NULL);
-
-            // Man page defines strncmp like this
-            //   int strncmp(const char *s1, const char *s2, size_t n);
-            static const unsigned intSizeInBits = static_cast<unsigned>(sizeof(int) * 8);
-            llvm::Type* nativeIntTy = llvm::Type::getIntNTy(ctx, intSizeInBits);
-            llvm::Type* nativeSizeTy = getNativeSizeType(ctx);
-            module->getOrInsertFunction("strncmp", nativeIntTy,
-                                        charPtrTy, charPtrTy, nativeSizeTy, NULL);
-
-            // Also need memcpy to insert into varchar fields into tuples
-            //   void *memcpy(void *restrict dst, const void *restrict src, size_t n);
-            module->getOrInsertFunction("memcpy",  charPtrTy,
-                                        charPtrTy, charPtrTy, nativeSizeTy, NULL);
-
-            llvm::Type* ptrToStringRef = llvm::PointerType::getUnqual(getStringRefType(ctx));
-            module->getOrInsertFunction("stringref_debug",
-                                        voidTy,
-                                        ptrToStringRef,
-                                        NULL);
             module->getOrInsertFunction("codegen_debug_ptr",
                                         voidTy,
                                         getNativeSizeType(ctx),
                                         charPtrTy,
                                         NULL);
+
             module->getOrInsertFunction("codegen_debug_size",
                                         voidTy,
                                         getNativeSizeType(ctx),

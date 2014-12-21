@@ -19,14 +19,65 @@
 #include "codegen/ExprGenerator.hpp"
 #include "codegen/CodegenContextImpl.hpp"
 #include "common/debuglog.h"
+#include "plannodes/aggregatenode.h"
 #include "plannodes/seqscannode.h"
+#include "plannodes/indexscannode.h"
+#include "plannodes/limitnode.h"
 #include "plannodes/projectionnode.h"
 #include "storage/table.h"
+#include "storage/tableiterator.h"
+#include "storage/temptable.h"
+#include "storage/temptable.h"
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Value.h"
+#include "llvm/IR/Module.h"
+
+extern "C" {
+
+    // These are C wrappers for functions called from generated code
+
+    voltdb::TableIterator* table_get_iterator(voltdb::Table* table) {
+        return &(table->iteratorDeletingAsWeGo());
+    }
+
+    voltdb::TableTuple* table_temp_tuple(voltdb::Table* table) {
+        return &(table->tempTuple());
+    }
+
+    void table_insert_tuple_nonvirtual(voltdb::TempTable* table, voltdb::TableTuple* tuple) {
+        table->insertTupleNonVirtual(*tuple);
+    }
+
+    const voltdb::TupleSchema* table_schema(voltdb::Table* table) {
+        return table->schema();
+    }
+
+    bool iterator_next(voltdb::TableIterator* iterator, voltdb::TableTuple* tuple) {
+        return iterator->next(*tuple);
+    }
+
+
+}
 
 namespace voltdb {
+
+    void PlanNodeFnGenerator::addExternalPrototypes(llvm::Module* module) {
+            llvm::LLVMContext& ctx = module->getContext();
+            llvm::Type* charPtrTy = llvm::Type::getInt8PtrTy(ctx);
+            llvm::Type* boolTy = llvm::Type::getInt8Ty(ctx);
+            llvm::Type* voidTy = llvm::Type::getVoidTy(ctx);
+            llvm::Type* ptrToTupleTy = llvm::PointerType::getUnqual(getTableTupleType(ctx));
+
+            module->getOrInsertFunction("table_get_iterator", charPtrTy, charPtrTy, NULL);
+            module->getOrInsertFunction("table_temp_tuple", ptrToTupleTy, charPtrTy, NULL);
+            module->getOrInsertFunction("table_insert_tuple_nonvirtual", voidTy, charPtrTy, ptrToTupleTy, NULL);
+            module->getOrInsertFunction("table_schema", charPtrTy, charPtrTy, NULL);
+
+            module->getOrInsertFunction("iterator_next", boolTy, charPtrTy, ptrToTupleTy, NULL);
+
+
+    }
 
     PlanNodeFnGenerator::PlanNodeFnGenerator(CodegenContextImpl* codegenContext, AbstractExecutor* executor)
         : m_codegenContext(codegenContext)
@@ -43,7 +94,7 @@ namespace voltdb {
         // bool
         // planNodeFunction(Table* inTable, Table* outTable);
         //
-        // represent the tables as void* for now.
+        // represent the tables as char* for now.
 
         std::ostringstream name;
         name << planNodeToString(node->getPlanNodeType()) << "_"
@@ -72,6 +123,9 @@ namespace voltdb {
         switch (pnt) {
         case PLAN_NODE_TYPE_SEQSCAN:
             codegenSeqScan(static_cast<SeqScanPlanNode*>(node));
+            break;
+        case PLAN_NODE_TYPE_INDEXSCAN:
+            codegenIndexScan(static_cast<IndexScanPlanNode*>(node));
             break;
         default: {
             std::ostringstream oss;
@@ -176,6 +230,39 @@ namespace voltdb {
         }
     }
 
+    static LimitPlanNode*
+    getInlineLimit(AbstractPlanNode* node) {
+        AbstractPlanNode* limit = node->getInlinePlanNode(PLAN_NODE_TYPE_LIMIT);
+        if (limit != NULL)
+            return static_cast<LimitPlanNode*>(limit);
+        else
+            return NULL;
+    }
+
+    static AggregatePlanNode*
+    getInlineAgg(AbstractPlanNode* node) {
+        AbstractPlanNode* agg = node->getInlinePlanNode(PLAN_NODE_TYPE_AGGREGATE);
+        if (agg == NULL)
+            agg = node->getInlinePlanNode(PLAN_NODE_TYPE_PARTIALAGGREGATE);
+
+        if (agg == NULL)
+            agg = node->getInlinePlanNode(PLAN_NODE_TYPE_HASHAGGREGATE);
+
+        if (agg != NULL)
+            return static_cast<AggregatePlanNode*>(agg);
+        else
+            return NULL;
+    }
+
+    static ProjectionPlanNode*
+    getInlineProj(AbstractPlanNode* node) {
+        AbstractPlanNode* proj = node->getInlinePlanNode(PLAN_NODE_TYPE_PROJECTION);
+        if (proj != NULL)
+            return static_cast<ProjectionPlanNode*>(proj);
+        else
+            return NULL;
+    }
+
     llvm::Value* PlanNodeFnGenerator::codegenSeqScanPredicate(AbstractExpression* pred,
                                                               const TupleSchema* schema,
                                                               llvm::Value* tupleStorage) {
@@ -198,10 +285,14 @@ namespace voltdb {
             return;
         }
 
-        ProjectionPlanNode* projNode = static_cast<ProjectionPlanNode*>(node->getInlinePlanNode(PLAN_NODE_TYPE_PROJECTION));
-        std::map<PlanNodeType, AbstractPlanNode*>::size_type numInlinedNodes = node->getInlinePlanNodes().size();
-        if (numInlinedNodes > 1 || (projNode == NULL && numInlinedNodes > 0)) {
-            throw UnsupportedForCodegenException("limit or agg inlined in scan");
+        ProjectionPlanNode* projNode = getInlineProj(node);
+
+        if (getInlineLimit(node)) {
+            throw UnsupportedForCodegenException("limit inlined in scan");
+        }
+
+        if (getInlineAgg(node)) {
+            throw UnsupportedForCodegenException("agg inlined in scan");
         }
 
         Table* inputTable = (node->isSubQuery()) ?
@@ -286,9 +377,6 @@ namespace voltdb {
         }
         llvm::Function* insertTupleFn =
             getExtFn("table_insert_tuple_nonvirtual");
-        // args.clear();
-        // args.push_back(getOutputTable());
-        // args.push_back(outputTuple);
         builder().CreateCall2(insertTupleFn, getOutputTable(), outputTuple);
         builder().CreateBr(scanLoopEntry);
 
@@ -296,6 +384,54 @@ namespace voltdb {
         builder().SetInsertPoint(scanLoopExit);
         llvm::Value* retValue = llvm::ConstantInt::get(llvm::Type::getInt8Ty(ctx), 1);
         builder().CreateRet(retValue);
+    }
+
+    void PlanNodeFnGenerator::codegenIndexScan(IndexScanPlanNode* node) {
+        // Just doing the scan loop (and not setting up the index keys for now
+
+        ProjectionPlanNode* projNode = getInlineProj(node);
+
+        if (getInlineLimit(node)) {
+            throw UnsupportedForCodegenException("limit inlined in index scan");
+        }
+
+        if (getInlineAgg(node)) {
+            throw UnsupportedForCodegenException("agg inlined in index scan");
+        }
+
+        if (node->getLookupType() != INDEX_LOOKUP_TYPE_EQ) {
+            throw UnsupportedForCodegenException("non-EQ index scan");
+        }
+
+        // Our input is a TableIndex*, and our output os OutputTable
+        llvm::BasicBlock *scanLoopExit = llvm::BasicBlock::Create(getLlvmContext(),
+                                                                  "ix_scan_loop_exit",
+                                                                  getFunction());
+        llvm::BasicBlock *scanLoopEntry = llvm::BasicBlock::Create(getLlvmContext(),
+                                                                   "ix_scan_loop_entry",
+                                                                   getFunction(),
+                                                                   scanLoopExit);
+        llvm::BasicBlock *scanLoopBody = llvm::BasicBlock::Create(getLlvmContext(),
+                                                                  "ix_scan_loop_body",
+                                                                  getFunction(),
+                                                                  scanLoopExit);
+        // Do the loop like
+        // tuple = table_index_next_value_at_key(cursor)
+        // if (tuple is not null) jump to loop body
+        // else jump to exit
+        //
+        // loop body:
+        //   ...
+        //
+        // tuple = table_index_next_value_at_key(cursor)
+        // if (tuple is not null) jump to loop body
+        // else jump to exit
+        //
+        // exit:
+        //   return 1;
+        (void)projNode;
+        (void)scanLoopEntry;
+        (void)scanLoopBody;
     }
 
     llvm::LLVMContext& PlanNodeFnGenerator::getLlvmContext() {

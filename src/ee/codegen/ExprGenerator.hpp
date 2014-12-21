@@ -133,6 +133,7 @@ namespace voltdb {
 
         static llvm::Type* getLlvmType(llvm::LLVMContext& ctx,
                                        const CGVoltType& voltType);
+        static void addExternalPrototypes(llvm::Module* module);
     private:
 
         llvm::IRBuilder<>& builder();

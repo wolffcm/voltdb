@@ -26,6 +26,7 @@
 #include "ExprGenerator.hpp"
 
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Module.h"
 #include "llvm/IR/Intrinsics.h"
 
 #include "codegen/CodegenContextImpl.hpp"
@@ -34,8 +35,62 @@
 #include "expressions/comparisonexpression.h"
 #include "expressions/operatorexpression.h"
 
+extern "C" {
+
+    // There are C wrappers for functions called from generated code
+
+    char* stringref_get(voltdb::StringRef* sr) {
+        return sr->get();
+    }
+
+    void stringref_debug(voltdb::StringRef* sr) {
+#if VOLT_LOG_LEVEL<=VOLT_LEVEL_TRACE
+        if (sr != NULL) {
+            VOLT_TRACE("StringRef addr %p", sr);
+            VOLT_TRACE("StringRef get() %p", sr->get());
+
+            const char mask = ~static_cast<char>(OBJECT_NULL_BIT | OBJECT_CONTINUATION_BIT);
+
+            char *data = sr->get();
+            char contBit = data[0] & OBJECT_CONTINUATION_BIT;
+            VOLT_TRACE("  data[0] & OBJECT_CONTINUATION_BIT: %d", contBit);
+            char nullBit = data[0] & OBJECT_NULL_BIT;
+            VOLT_TRACE("  data[0] & OBJECT_NULL_BIT: %d", nullBit);
+            char shortDataSize = data[0] & mask;
+            VOLT_TRACE("  shortDataSize: %d", shortDataSize);
+        }
+        else {
+            VOLT_TRACE("StringRef is NULL");
+        }
+#endif
+    }
+}
 
 namespace voltdb {
+
+    void ExprGenerator::addExternalPrototypes(llvm::Module* module) {
+        llvm::LLVMContext& ctx = module->getContext();
+
+        llvm::Type* charPtrTy = llvm::Type::getInt8PtrTy(ctx);
+        llvm::Type* ptrToStringRefTy = getPtrToStringRefType(ctx);
+        llvm::Type* voidTy = llvm::Type::getVoidTy(ctx);
+
+        // Man page defines strncmp like this
+        //   int strncmp(const char *s1, const char *s2, size_t n);
+        static const unsigned intSizeInBits = static_cast<unsigned>(sizeof(int) * 8);
+        llvm::Type* nativeIntTy = llvm::Type::getIntNTy(ctx, intSizeInBits);
+        llvm::Type* nativeSizeTy = getNativeSizeType(ctx);
+        module->getOrInsertFunction("strncmp", nativeIntTy,
+                                    charPtrTy, charPtrTy, nativeSizeTy, NULL);
+
+        module->getOrInsertFunction("stringref_get", charPtrTy,
+                                    ptrToStringRefTy, NULL);
+
+        module->getOrInsertFunction("stringref_debug",
+                                    voidTy,
+                                    ptrToStringRefTy,
+                                    NULL);
+    }
 
     namespace {
 

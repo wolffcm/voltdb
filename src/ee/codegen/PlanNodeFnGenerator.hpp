@@ -35,6 +35,7 @@ namespace voltdb {
     class CGValue;
     class ProjectionPlanNode;
     class SeqScanPlanNode;
+    class IndexScanPlanNode;
     class TupleSchema;
 
     class PlanNodeFnGenerator {
@@ -45,6 +46,8 @@ namespace voltdb {
         void init(AbstractPlanNode *node);
         void codegen(AbstractPlanNode *node);
         llvm::Function* getFunction() const;
+
+        static void addExternalPrototypes(llvm::Module* module);
 
     private:
         llvm::Value* getInputTable();
@@ -75,6 +78,7 @@ namespace voltdb {
                                              llvm::Value* tupleStorage);
 
         void codegenSeqScan(SeqScanPlanNode* node);
+        void codegenIndexScan(IndexScanPlanNode* node);
         llvm::LLVMContext& getLlvmContext();
 
         llvm::IRBuilder<>& builder();
