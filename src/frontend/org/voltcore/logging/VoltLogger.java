@@ -17,14 +17,17 @@
 
 package org.voltcore.logging;
 
-import com.google_voltpatches.common.base.Throwables;
-import org.voltcore.utils.CoreUtils;
-import org.voltcore.utils.ShutdownHooks;
-
-import java.io.StringWriter;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+
+import org.voltcore.utils.ShutdownHooks;
+
+import com.google_voltpatches.common.base.Throwables;
 
 /**
  * Class that implements the core functionality of a Log4j logger
@@ -34,26 +37,56 @@ import java.util.concurrent.ExecutorService;
  */
 public class VoltLogger {
     final CoreVoltLogger m_logger;
+    private static final String ASYNCH_LOGGER_THREAD_NAME = "Async Logger";
 
-    private static final String m_threadName = "Async Logger";
-    private static final ExecutorService m_es = CoreUtils.getSingleThreadExecutor(m_threadName);
+    /// A thread factory implementation customized for asynchronous logging tasks.
+    /// This class and its use to initialize m_asynchLoggerPool bypasses similar code in CoreUtils.
+    /// Duplicating that functionality seemed less bad than maintaining potentially circular
+    /// dependencies between the static initializers here and those in CoreUtils.
+    /// Such dependencies were implicated in a mysterious platform-specific hang.
+    /// Also, the CoreUtils code will LOG any exception thrown by the launched runnable.
+    /// That seems like a bad idea in this case, since the failed runnable in question is
+    /// responsible for logging.
+    /// Here, for simplicity, the runnables provided by the callers of submit or execute
+    /// take responsibility for their own blanket exception catching.
+    /// They fall back to writing a complaint to System.err on the assumption that a throw
+    /// from the logging call indicates that logging is seriously broken and unusable.
+    private static class LoggerThreadFactory implements ThreadFactory {
+        private static final int SMALL_STACK_SIZE = 1024 * 256;
+        @Override
+        public synchronized Thread newThread(final Runnable runnable) {
+            Thread t = new Thread(null, runnable, ASYNCH_LOGGER_THREAD_NAME, SMALL_STACK_SIZE);
+            t.setDaemon(true);
+            return t;
+        }
+    };
 
-    private static final boolean m_disableAsync = Boolean.getBoolean("DISABLE_ASYNC_LOGGING");
+    // The pool containing the logger thread(s) or null if asynch logging is disabled.
+    // In the latter case, all logging takes place synchronously on the caller's thread.
+    private static final ExecutorService m_asynchLoggerPool =
+            Boolean.getBoolean("DISABLE_ASYNC_LOGGING") ?
+                    null :
+                    new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<Runnable>(),
+                            new LoggerThreadFactory());
 
     static {
-        ShutdownHooks.registerShutdownHook(ShutdownHooks.VOLT_LOGGER, true, new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    m_es.submit(new Runnable() {
-                        @Override
-                    public void run() {}
-                    }).get();
-                } catch (Exception e) {
-                    Throwables.getRootCause(e).printStackTrace();
+        if (m_asynchLoggerPool != null) {
+            // Prepare to queue and wait on a do-nothing asynch logging task to ensure that the
+            // queue is flushed before shutdown.
+            ShutdownHooks.registerShutdownHook(ShutdownHooks.VOLT_LOGGER, true, new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        m_asynchLoggerPool.submit(new Runnable() {
+                            @Override
+                            public void run() {}
+                        }).get();
+                    } catch (Exception e) {
+                        Throwables.getRootCause(e).printStackTrace();
+                    }
                 }
-            }
-        });
+            });
+        }
     }
 
 
@@ -65,77 +98,118 @@ public class VoltLogger {
         public boolean isEnabledFor(Level level);
         public void log(Level level, Object message, Throwable t);
         public void l7dlog(Level level, String key, Object[] params, Throwable t);
-        public void addSimpleWriterAppender(StringWriter writer);
-        public void setLevel(Level level);
         public long getLogLevels(VoltLogger loggers[]);
     }
 
+    private static final Constructor<?> LOG4J_CONSTRUCTOR =  softLoadLog4jLoggerConstructor();
+
+    /// Try to dynamically load Volt's Log4j logger wrapper class without importing it.
+    /// The intent is to fail gracefully at runtime if its Log4j third party dependencies
+    /// are not in the classpath.  If the class and it dependencies are successfully loaded,
+    /// return the one-String-argument constructor of the wrapper class.
+    /// Any exception will become a null return here.
+    /// That will effectively mark Log4j functionality as unavailable to the current process.
+    /// So, for example, the fallback logger based on java.util.logging will be used and
+    /// the ability of the user to specify Log4j-specific options will be disabled.
+    /// See the VoltLogger constructor and the configure method.
+    private static Constructor<?> softLoadLog4jLoggerConstructor() {
+        try {
+            Class<?> loggerClz = Class.forName("org.voltcore.logging.VoltLog4jLogger");
+            assert(loggerClz != null);
+            return loggerClz.getConstructor(String.class);
+        }
+        catch (Exception e) {}
+        catch (LinkageError e) {}
+        return null;
+    }
+
     /*
-     * Submit all tasks asynchronously to the thread to preserve message order,
-     * but don't wait for the task to complete for info, debug, trace, and warn
+     * Submit a task asynchronously to the thread to preserve message order,
+     * and wait for the task to complete.
      */
-    private void submit(final Level l, final Object message, final Throwable t, boolean wait) {
-        if (m_disableAsync) {
-            m_logger.log(l, message, t);
+    private void submit(final Level level, final Object message, final Throwable t) {
+        if (!m_logger.isEnabledFor(level)) return;
+
+        if (m_asynchLoggerPool == null) {
+            m_logger.log(level, message, t);
             return;
         }
 
-        if (!m_logger.isEnabledFor(l)) return;
-
-        final Thread currentThread = Thread.currentThread();
-        final Runnable r = new Runnable() {
-            @Override
-            public void run() {
-                Thread.currentThread().setName(currentThread.getName());
-                try {
-                    m_logger.log(l, message, t);
-                } finally {
-                    Thread.currentThread().setName(m_threadName);
-                }
-            }
-        };
-        if (wait) {
-            try {
-                m_es.submit(r).get();
-            } catch (Exception e) {
-                Throwables.propagate(e);
-            }
-        } else {
-            m_es.execute(r);
+        final Runnable runnableLoggingTask = createRunnableLoggingTask(level, message, t);
+        try {
+            m_asynchLoggerPool.submit(runnableLoggingTask).get();
+        } catch (Exception e) {
+            Throwables.propagate(e);
         }
     }
 
+    /*
+     * Submit a task asynchronously to the thread to preserve message order,
+     * but don't wait for the task to complete for info, debug, trace, and warn
+     */
+    private void execute(final Level level, final Object message, final Throwable t) {
+        if (!m_logger.isEnabledFor(level)) return;
+
+        if (m_asynchLoggerPool == null) {
+            m_logger.log(level, message, t);
+            return;
+        }
+
+        final Runnable runnableLoggingTask = createRunnableLoggingTask(level, message, t);
+        m_asynchLoggerPool.execute(runnableLoggingTask);
+    }
+
+    /**
+     * Generate a runnable task that logs one message in an exception-safe way.
+     * @param level
+     * @param message
+     * @param t
+     * @param callerThreadName
+     * @return
+     */
+    private Runnable createRunnableLoggingTask(final Level level,
+            final Object message, final Throwable t) {
+        // While logging, the logger thread temporarily disguises itself as its caller.
+        final String callerThreadName = Thread.currentThread().getName();
+
+        final Runnable runnableLoggingTask = new Runnable() {
+            @Override
+            public void run() {
+                Thread loggerThread = Thread.currentThread();
+                loggerThread.setName(callerThreadName);
+                try {
+                    m_logger.log(level, message, t);
+                } catch (Throwable t) {
+                    System.err.println("Exception thrown in logging thread for " +
+                            callerThreadName + ":" + t);
+                } finally {
+                    loggerThread.setName(ASYNCH_LOGGER_THREAD_NAME);
+                }
+            }
+        };
+        return runnableLoggingTask;
+    }
+
     private void submitl7d(final Level level, final String key, final Object[] params, final Throwable t) {
-        if (m_disableAsync) {
+        if (!m_logger.isEnabledFor(level)) return;
+
+        if (m_asynchLoggerPool == null) {
             m_logger.l7dlog(level, key, params, t);
             return;
         }
 
-        if (!m_logger.isEnabledFor(level)) return;
-
-        final Thread currentThread = Thread.currentThread();
-        final Runnable r = new Runnable() {
-            @Override
-            public void run() {
-                Thread.currentThread().setName(currentThread.getName());
-                try {
-                    m_logger.l7dlog(level, key, params, t);
-                } finally {
-                    Thread.currentThread().setName(m_threadName);
-                }
-            }
-        };
+        final Runnable runnableLoggingTask = createRunnableL7dLoggingTask(level, key, params, t);
         switch (level) {
             case INFO:
             case WARN:
             case DEBUG:
             case TRACE:
-                m_es.execute(r);
+                m_asynchLoggerPool.execute(runnableLoggingTask);
                 break;
             case FATAL:
             case ERROR:
                 try {
-                    m_es.submit(r).get();
+                    m_asynchLoggerPool.submit(runnableLoggingTask).get();
                 } catch (Exception e) {
                     Throwables.propagate(e);
                 }
@@ -145,12 +219,43 @@ public class VoltLogger {
         }
     }
 
+    /**
+     * Generate a runnable task that logs one localized message in an exception-safe way.
+     * @param level
+     * @param message
+     * @param t
+     * @param callerThreadName
+     * @return
+     */
+    private Runnable createRunnableL7dLoggingTask(final Level level,
+            final String key, final Object[] params, final Throwable t) {
+        // While logging, the logger thread temporarily disguises itself as its caller.
+        final String callerThreadName = Thread.currentThread().getName();
+
+        final Runnable runnableLoggingTask = new Runnable() {
+            @Override
+            public void run() {
+                Thread loggerThread = Thread.currentThread();
+                loggerThread.setName(callerThreadName);
+                try {
+                    m_logger.l7dlog(level, key, params, t);
+                } catch (Throwable t) {
+                    System.err.println("Exception thrown in logging thread for " +
+                            callerThreadName + ":" + t);
+                } finally {
+                    loggerThread.setName(ASYNCH_LOGGER_THREAD_NAME);
+                }
+            }
+        };
+        return runnableLoggingTask;
+    }
+
     public void debug(Object message) {
-        submit(Level.DEBUG, message, null, false);
+        execute(Level.DEBUG, message, null);
     }
 
     public void debug(Object message, Throwable t) {
-        submit(Level.DEBUG, message, t, false);
+        execute(Level.DEBUG, message, t);
     }
 
     public boolean isDebugEnabled() {
@@ -158,27 +263,27 @@ public class VoltLogger {
     }
 
     public void error(Object message) {
-        submit(Level.ERROR, message, null, true);
+        submit(Level.ERROR, message, null);
     }
 
     public void error(Object message, Throwable t) {
-        submit(Level.ERROR, message, t, true);
+        submit(Level.ERROR, message, t);
     }
 
     public void fatal(Object message) {
-        submit(Level.FATAL, message, null, true);
+        submit(Level.FATAL, message, null);
     }
 
     public void fatal(Object message, Throwable t) {
-        submit(Level.FATAL, message, t, true);
+        submit(Level.FATAL, message, t);
     }
 
     public void info(Object message) {
-        submit(Level.INFO, message, null, false);
+        execute(Level.INFO, message, null);
     }
 
     public void info(Object message, Throwable t) {
-        submit(Level.INFO, message, t, false);
+        execute(Level.INFO, message, t);
     }
 
     public boolean isInfoEnabled() {
@@ -186,11 +291,11 @@ public class VoltLogger {
     }
 
     public void trace(Object message) {
-       submit(Level.TRACE, message, null, false);
+        execute(Level.TRACE, message, null);
     }
 
     public void trace(Object message, Throwable t) {
-       submit(Level.TRACE, message, t, false);
+        execute(Level.TRACE, message, t);
     }
 
     public boolean isTraceEnabled() {
@@ -198,11 +303,11 @@ public class VoltLogger {
     }
 
     public void warn(Object message) {
-        submit(Level.WARN, message, null, false);
+        execute(Level.WARN, message, null);
     }
 
     public void warn(Object message, Throwable t) {
-        submit(Level.WARN, message, t, false);
+        execute(Level.WARN, message, t);
     }
 
     public void l7dlog(final Level level, final String key, final Throwable t) {
@@ -213,63 +318,53 @@ public class VoltLogger {
         submitl7d(level, key, params, t);
     }
 
-    public void addSimpleWriterAppender(StringWriter writer) {
-        m_logger.addSimpleWriterAppender(writer);
-    }
-
-    public void setLevel(Level level) {
-        m_logger.setLevel(level);
-    }
-
     public long getLogLevels(VoltLogger loggers[]) {
         return m_logger.getLogLevels(loggers);
     }
 
     /**
-     * Static method to change the Log4j config globally. This fails
-     * if you're not using Log4j for now.
+     * Static method to change the Log4j config globally.
+     * This silently fails for now if Log4j is not available.
+     * In the future, there could be some attempt to at least partially translate Log4j's
+     * xml config options into options supported by java.util.logging OR
+     * an error could be logged or propagated up to/through the @UpdateLogging
+     * SystemStoredProcedure.
      * @param xmlConfig The text of a Log4j config file.
      */
     public static void configure(String xmlConfig) {
+        // If the earlier attempt to find the VoltLog4jLogger for its constructor failed,
+        // there's no point repeating what is largely that same exercise for its
+        // configure method.
+        // There's little point in configuring the behavior of the class that can't be instantiated.
+        if (LOG4J_CONSTRUCTOR == null) {
+            return;
+        }
         try {
             Class<?> loggerClz = Class.forName("org.voltcore.logging.VoltLog4jLogger");
             assert(loggerClz != null);
             Method configureMethod = loggerClz.getMethod("configure", String.class);
             configureMethod.invoke(null, xmlConfig);
-        } catch (Exception e) {
-            return;
-        }
+        } catch (Exception e) {}
     }
 
     /**
-     * Try to load the Log4j logger without importing it. Eventually support
-     * graceful failback to java.util.logging.
+     * Try to instantiate the Log4j-based logger if available.
+     * Otherwise, support graceful fallback to the java.util.logging-based implementation.
      * @param classname The id of the logger.
      */
     public VoltLogger(String classname) {
         CoreVoltLogger tempLogger = null;
-
-        // try to load the Log4j logger without importing it
-        // any exception thrown will just keep going
-        try {
-            Class<?> loggerClz = Class.forName("org.voltcore.logging.VoltLog4jLogger");
-            assert(loggerClz != null);
-
-            Constructor<?> constructor = loggerClz.getConstructor(String.class);
-            tempLogger = (CoreVoltLogger) constructor.newInstance(classname);
+        if (LOG4J_CONSTRUCTOR != null) {
+            try {
+                tempLogger = (CoreVoltLogger) LOG4J_CONSTRUCTOR.newInstance(classname);
+            } catch (Exception e) {}
         }
-        catch (Exception e) {}
-        catch (LinkageError e) {}
 
-        // if unable to load Log4j, try to use java.util.logging
-        if (tempLogger == null)
+        // if unable to load or use the Log4j-based implementation, use java.util.logging
+        if (tempLogger == null) {
             tempLogger = new VoltUtilLoggingLogger(classname);
-
-        // set the final variable for the core logger
+        }
+        // Init the final member to the chosen core logger.
         m_logger = tempLogger;
-
-        // Don't let the constructor exit without
-        if (m_logger == null)
-            throw new RuntimeException("Unable to get VoltLogger instance.");
     }
 }
