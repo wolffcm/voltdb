@@ -1,0 +1,2 @@
+AdHoc DDL contains an unsupported DDL statement: # Provide something to query.
+create table my_table_0 (i integer)

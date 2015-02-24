@@ -1,0 +1,4 @@
+# Provide something to query.
+create table my_table_0 (i integer);
+
+file -batch ./scripts/batching/query_ddl_mix.sqlfile
