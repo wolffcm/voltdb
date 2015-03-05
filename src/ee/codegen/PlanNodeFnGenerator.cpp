@@ -127,6 +127,8 @@ namespace voltdb {
     }
 
     void PlanNodeFnGenerator::codegen(AbstractPlanNode *node) {
+        throw UnsupportedForCodegenException("Plan node codegen disabled.");
+
         PlanNodeType pnt = node->getPlanNodeType();
         switch (pnt) {
         case PLAN_NODE_TYPE_SEQSCAN:

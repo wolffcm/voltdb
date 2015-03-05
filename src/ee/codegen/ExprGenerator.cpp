@@ -171,6 +171,7 @@ namespace voltdb {
         llvm::Value* getOutlinedVarcharBuffer(CodegenContextImpl* cgCtx,
                                               llvm::IRBuilder<>& builder,
                                               const CGValue& vcVal) {
+            throw UnsupportedForCodegenException("Outlined varchar fields are unsupported!");
             llvm::Function* stringRefGetFn = cgCtx->getFunction("stringref_get");
             llvm::Value* buffer = builder.CreateCall(stringRefGetFn, vcVal.val(), "outl_vc_buf");
             return buffer;
