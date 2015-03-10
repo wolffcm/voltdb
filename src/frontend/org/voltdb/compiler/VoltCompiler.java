@@ -1059,9 +1059,10 @@ public class VoltCompiler {
         }
 
         // shutdown and make a new hsqldb
-        HSQLInterface hsql = HSQLInterface.loadHsqldb();
-        compileDatabase(db, hsql, voltDdlTracker, cannonicalDDLIfAny, previousDBIfAny, ddlReaderList, database.getExport(), classDependencies,
-                        DdlProceduresToLoad.ALL_DDL_PROCEDURES, jarOutput);
+        try (HSQLInterface hsql = HSQLInterface.loadHsqldb()) {
+            compileDatabase(db, hsql, voltDdlTracker, cannonicalDDLIfAny, previousDBIfAny, ddlReaderList, database.getExport(), classDependencies,
+                            DdlProceduresToLoad.ALL_DDL_PROCEDURES, jarOutput);
+        }
     }
 
     /**

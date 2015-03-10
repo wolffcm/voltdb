@@ -41,7 +41,7 @@ import org.hsqldb_voltpatches.result.Result;
  * <li>Compile SQL DML Statements to XML</li>
  * </ul>
  */
-public class HSQLInterface {
+public class HSQLInterface implements AutoCloseable {
 
     static public String XML_SCHEMA_NAME = "databaseschema";
     /**
@@ -93,7 +93,7 @@ public class HSQLInterface {
         }
     }
 
-    Session sessionProxy;
+    private Session m_sessionProxy;
     // Keep track of the previous XML for each table in the schema
     Map<String, VoltXMLElement> lastSchema = new TreeMap<>();
     // empty schema for cloning and for null diffs
@@ -102,15 +102,19 @@ public class HSQLInterface {
 
     private HSQLInterface(Session sessionProxy) {
         emptySchema.attributes.put("name", XML_SCHEMA_NAME);
-        this.sessionProxy = sessionProxy;
+        this.m_sessionProxy = sessionProxy;
     }
 
     @Override
     public void finalize() {
-        final Database db = sessionProxy.getDatabase();
-        sessionProxy.close();
-        db.close(Database.CLOSEMODE_IMMEDIATELY);
-        sessionProxy = null;
+        if (m_sessionProxy != null) {
+            final Database db = m_sessionProxy.getDatabase();
+            m_sessionProxy.close();
+            if (db != null) {
+                db.close(Database.CLOSEMODE_IMMEDIATELY);
+            }
+            m_sessionProxy = null;
+        }
     }
 
     /**
@@ -263,7 +267,7 @@ public class HSQLInterface {
      * encountered.
      */
     public void runDDLCommand(String ddl) throws HSQLParseException {
-        Result result = sessionProxy.executeDirectStatement(ddl);
+        Result result = m_sessionProxy.executeDirectStatement(ddl);
         if (result.hasError()) {
             throw new HSQLParseException(result.getMainString());
         }
@@ -304,10 +308,10 @@ public class HSQLInterface {
     {
         Statement cs = null;
         // clear the expression node id set for determinism
-        sessionProxy.resetVoltNodeIds();
+        m_sessionProxy.resetVoltNodeIds();
 
         try {
-            cs = sessionProxy.compileStatement(sql);
+            cs = m_sessionProxy.compileStatement(sql);
         } catch( HsqlException hex) {
             // a switch in case we want to give more error details on additional error codes
             switch( hex.getErrorCode()) {
@@ -327,13 +331,13 @@ public class HSQLInterface {
         }
 
         VoltXMLElement xml = null;
-        xml = cs.voltGetStatementXML(sessionProxy);
+        xml = cs.voltGetStatementXML(m_sessionProxy);
 
         // this releases some small memory hsql uses that builds up over time if not
         // cleared
         // if it's not called for every call of getXMLCompiledStatement, that's ok;
         // it'll get called next time
-        sessionProxy.sessionData.persistentStoreCollection.clearAllTables();
+        m_sessionProxy.sessionData.persistentStoreCollection.clearAllTables();
 
         // clean up sql-in expressions
         fixupInStatementExpressions(xml);
@@ -453,7 +457,7 @@ public class HSQLInterface {
     @SuppressWarnings("unused")
     private void printTables() {
         try {
-            String schemaName = sessionProxy.getSchemaName(null);
+            String schemaName = m_sessionProxy.getSchemaName(null);
             System.out.println("*** Tables For Schema: " + schemaName + " ***");
         } catch (HsqlException e) {
             e.printStackTrace();
@@ -516,7 +520,7 @@ public class HSQLInterface {
         HashMappedList hsqlTables = getHSQLTables();
         for (int i = 0; i < hsqlTables.size(); i++) {
             Table table = (Table) hsqlTables.get(i);
-            VoltXMLElement vxmle = table.voltGetTableXML(sessionProxy);
+            VoltXMLElement vxmle = table.voltGetTableXML(m_sessionProxy);
             assert(vxmle != null);
             xml.children.add(vxmle);
         }
@@ -539,7 +543,7 @@ public class HSQLInterface {
 
             // found the table of interest
             if (candidateTableName.equalsIgnoreCase(tableName)) {
-                VoltXMLElement vxmle = table.voltGetTableXML(sessionProxy);
+                VoltXMLElement vxmle = table.voltGetTableXML(m_sessionProxy);
                 assert(vxmle != null);
                 xml.children.add(vxmle);
                 return xml;
@@ -548,17 +552,25 @@ public class HSQLInterface {
         return null;
     }
 
+    @Override
+    public void close() {
+        final Database db = m_sessionProxy.getDatabase();
+        m_sessionProxy.close();
+        db.close(Database.CLOSEMODE_IMMEDIATELY);
+        m_sessionProxy = null;
+    }
+
     /**
      * This code was repeated a lot so I factored it out.
      */
     private HashMappedList getHSQLTables() {
         String schemaName = null;
         try {
-            schemaName = sessionProxy.getSchemaName(null);
+            schemaName = m_sessionProxy.getSchemaName(null);
         } catch (HsqlException e) {
             e.printStackTrace();
         }
-        SchemaManager schemaManager = sessionProxy.getDatabase().schemaManager;
+        SchemaManager schemaManager = m_sessionProxy.getDatabase().schemaManager;
 
         // search all the tables XXX probably could do this non-linearly,
         //  but i don't know about case-insensitivity yet
