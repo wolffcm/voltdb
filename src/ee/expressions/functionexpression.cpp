@@ -389,6 +389,9 @@ ExpressionUtil::functionFactory(int functionId, const std::vector<AbstractExpres
         case FUNC_VOLT_FORMAT_CURRENCY:
             ret = new GeneralFunctionExpression<FUNC_VOLT_FORMAT_CURRENCY>(*arguments);
             break;
+        case FUNC_VOLT_GEO_WITHIN:
+            ret = new GeneralFunctionExpression<FUNC_VOLT_GEO_WITHIN>(*arguments);
+            break;
         default:
             return NULL;
         }
@@ -398,4 +401,3 @@ ExpressionUtil::functionFactory(int functionId, const std::vector<AbstractExpres
 }
 
 }
-

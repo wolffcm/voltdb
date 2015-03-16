@@ -121,6 +121,8 @@ public class FunctionForVoltDB extends FunctionSQL {
 
         static final int FUNC_VOLT_FORMAT_CURRENCY        = 20025;
 
+        static final int FUNC_VOLT_GEO_WITHIN             = 20026;
+
         static final int FUNC_CONCAT                      = 124;
 
         private static final FunctionId[] instances = {
@@ -146,6 +148,14 @@ public class FunctionForVoltDB extends FunctionSQL {
                     new Type[] { Type.SQL_VARCHAR, Type.SQL_VARCHAR, Type.SQL_VARCHAR },
                     new short[] { Tokens.OPENBRACKET, Tokens.QUESTION,
                                   Tokens.COMMA, Tokens.QUESTION,
+                                  Tokens.COMMA, Tokens.QUESTION,
+                                  Tokens.CLOSEBRACKET }),
+
+            // Really want this function to return a boolean.
+            // for now, make it return 0, 1, or NULL.
+            new FunctionId("geo_within", Type.SQL_INTEGER, FUNC_VOLT_GEO_WITHIN, -1,
+                    new Type[] { Type.SQL_VARCHAR, Type.SQL_VARCHAR },
+                    new short[] { Tokens.OPENBRACKET, Tokens.QUESTION,
                                   Tokens.COMMA, Tokens.QUESTION,
                                   Tokens.CLOSEBRACKET }),
 

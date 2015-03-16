@@ -245,10 +245,11 @@ CTX.INPUT['executors'] = """
 CTX.INPUT['expressions'] = """
  abstractexpression.cpp
  expressionutil.cpp
- vectorexpression.cpp
  functionexpression.cpp
- tupleaddressexpression.cpp
+ geofunctions.cpp
  parametervalueexpression.cpp
+ tupleaddressexpression.cpp
+ vectorexpression.cpp
 """
 
 CTX.INPUT['plannodes'] = """
