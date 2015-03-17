@@ -20,6 +20,7 @@
 #include <boost/geometry.hpp>
 #include <boost/geometry/algorithms/append.hpp>
 #include <boost/geometry/algorithms/within.hpp>
+#include <boost/geometry/core/cs.hpp>
 #include <boost/geometry/geometries/adapted/boost_tuple.hpp>
 #include <boost/geometry/geometries/point_xy.hpp>
 #include <boost/geometry/geometries/polygon.hpp>
@@ -28,12 +29,18 @@
 #include "common/NValue.hpp"
 #include "common/PlannerDomValue.h"
 #include "expressions/geofunctions.h"
-#include "expressions/jsonfunctions.h"
 
 namespace voltdb {
 
-typedef boost::geometry::model::d2::point_xy<double> Point;
-typedef boost::geometry::model::polygon<boost::geometry::model::d2::point_xy<double> > Polygon;
+namespace bg = boost::geometry;
+
+// Use latitude/longitude coords, specified in degrees
+typedef bg::cs::geographic<bg::degree> CoordSys;
+
+// Points are defined using doubles
+typedef bg::model::point<double, 2, CoordSys> Point;
+
+typedef bg::model::polygon<Point> Polygon;
 
 static void throwGeoJsonFormattingError(const std::string& geoJson) {
     char msg[1024];
@@ -41,28 +48,18 @@ static void throwGeoJsonFormattingError(const std::string& geoJson) {
     throw SQLException(SQLException::data_exception_invalid_parameter, msg);
 }
 
-static std::string docGet(JsonDocument& doc, const std::string& path) {
-    std::string result;
-    assert (doc.get(path.c_str(), path.length(), result));
-
-    // JsonDocument will append a trailing newline... why?
-    boost::trim(result);
-    return result;
-}
-
 static Point geoJsonToPoint(const char* geoJsonStr, int32_t len) {
 
-    // Should I use PlannerDomRoot or JsonDocument here?
-
-    JsonDocument doc(geoJsonStr, len);
-    std::string geometryType = docGet(doc, "type");
-
+    PlannerDomRoot domRoot(geoJsonStr);
+    PlannerDomValue root = domRoot.rootObject();
+    std::string geometryType = root.valueForKey("type").asStr();
     if (! boost::iequals("Point", geometryType)) {
         throwGeoJsonFormattingError(geoJsonStr);
     }
 
-    double xCoord = boost::lexical_cast<double>(docGet(doc, "coordinates[0]"));
-    double yCoord = boost::lexical_cast<double>(docGet(doc, "coordinates[1]"));
+    PlannerDomValue coords = root.valueForKey("coordinates");
+    double xCoord = coords.valueAtIndex(0).asDouble();
+    double yCoord = coords.valueAtIndex(1).asDouble();
 
     return Point(xCoord, yCoord);
 }
@@ -99,7 +96,7 @@ static Polygon geoJsonToPolygon(const char* geoJsonStr, int32_t len) {
     for (int i = 0; i < numPoints; ++i) {
         double x = outerRing.valueAtIndex(i).valueAtIndex(0).asDouble();
         double y = outerRing.valueAtIndex(i).valueAtIndex(1).asDouble();
-        boost::geometry::append(poly, Point(x, y));
+        bg::append(poly, Point(x, y));
     }
 
     return poly;
@@ -132,7 +129,7 @@ template<> NValue NValue::call<FUNC_VOLT_GEO_WITHIN>(const std::vector<NValue>& 
     Polygon poly = geoJsonToPolygon(jsonStrPoly, len);
 
     NValue result(VALUE_TYPE_INTEGER);
-    bool b = boost::geometry::within(pt, poly);
+    bool b = bg::within(pt, poly);
     if (b) {
         result.getInteger() = 1;
     }
