@@ -30,14 +30,10 @@
 #include "expressions/geofunctions.h"
 #include "expressions/jsonfunctions.h"
 
-// Treat boost::tuples as cartesian coordinates
-BOOST_GEOMETRY_REGISTER_BOOST_TUPLE_CS(boost::geometry::cs::cartesian)
-
-
 namespace voltdb {
 
-    typedef boost::geometry::model::d2::point_xy<double> Point;
-    typedef boost::geometry::model::polygon<boost::geometry::model::d2::point_xy<double> > Polygon;
+typedef boost::geometry::model::d2::point_xy<double> Point;
+typedef boost::geometry::model::polygon<boost::geometry::model::d2::point_xy<double> > Polygon;
 
 static void throwGeoJsonFormattingError(const std::string& geoJson) {
     char msg[1024];
@@ -45,14 +41,14 @@ static void throwGeoJsonFormattingError(const std::string& geoJson) {
     throw SQLException(SQLException::data_exception_invalid_parameter, msg);
 }
 
-    static std::string docGet(JsonDocument& doc, const std::string& path) {
-        std::string result;
-        assert (doc.get(path.c_str(), path.length(), result));
+static std::string docGet(JsonDocument& doc, const std::string& path) {
+    std::string result;
+    assert (doc.get(path.c_str(), path.length(), result));
 
-        // JsonDocument will append a trailing newline... why?
-        boost::trim(result);
-        return result;
-    }
+    // JsonDocument will append a trailing newline... why?
+    boost::trim(result);
+    return result;
+}
 
 static Point geoJsonToPoint(const char* geoJsonStr, int32_t len) {
 
@@ -73,15 +69,10 @@ static Point geoJsonToPoint(const char* geoJsonStr, int32_t len) {
 
 static Polygon geoJsonToPolygon(const char* geoJsonStr, int32_t len) {
 
-    std::cout << "Creating poly from:\n" << geoJsonStr << std::endl;
-
     PlannerDomRoot domRoot(geoJsonStr);
     PlannerDomValue root = domRoot.rootObject();
 
     std::string geometryType = root.valueForKey("type").asStr();
-
-    std::cout << "Geometry type is " << geometryType << std::endl;
-
     if (! boost::iequals("Polygon", geometryType)) {
         throwGeoJsonFormattingError(geoJsonStr);
     }
@@ -103,37 +94,13 @@ static Polygon geoJsonToPolygon(const char* geoJsonStr, int32_t len) {
     // }
 
     PlannerDomValue outerRing = root.valueForKey("coordinates").valueAtIndex(0);
-
-
-    // Json::Value ringRoot;
-    // Json::Reader reader;
-    // assert(reader.parse(outerRing, ringRoot));
-
-    // int32_t numPoints = ringRoot.size();
-    // assert(numPoints > 0);
-
-    // std::cout << "Polygon has " << numPoints << " points." << std::endl;
-
-    // JsonDocument ringDoc(outerRing.c_str(), outerRing.length());
-
-int numPoints = outerRing.arrayLen();
+    int numPoints = outerRing.arrayLen();
     Polygon poly;
     for (int i = 0; i < numPoints; ++i) {
         double x = outerRing.valueAtIndex(i).valueAtIndex(0).asDouble();
-        double y = outerRing.valueAtIndex(i).valueAtIndex(0).asDouble();
-
-        // std::ostringstream path;
-        // path << "coordinates[0][" << i << "][0]";
-        // double x = boost::lexical_cast<double>(docGet(doc, path.str()));
-
-        // path.str("");
-        // path << "coordinates[0][" << i << "][1]";
-        // double y = boost::lexical_cast<double>(docGet(doc, path.str()));
-
+        double y = outerRing.valueAtIndex(i).valueAtIndex(1).asDouble();
         boost::geometry::append(poly, Point(x, y));
     }
-
-    //std::cout << "Created polygon " << poly << std::endl;
 
     return poly;
 }
@@ -161,12 +128,11 @@ template<> NValue NValue::call<FUNC_VOLT_GEO_WITHIN>(const std::vector<NValue>& 
     Point pt = geoJsonToPoint(jsonStrPoint, len);
 
     const char* jsonStrPoly = reinterpret_cast<char*>(nvalPoly.getObjectValue_withoutNull());
-    len = nvalPoint.getObjectLength_withoutNull();
+    len = nvalPoly.getObjectLength_withoutNull();
     Polygon poly = geoJsonToPolygon(jsonStrPoly, len);
 
     NValue result(VALUE_TYPE_INTEGER);
-    boost::tuple<double, double> p = boost::make_tuple(pt.x(), pt.y());
-    bool b = boost::geometry::within(p, poly);
+    bool b = boost::geometry::within(pt, poly);
     if (b) {
         result.getInteger() = 1;
     }

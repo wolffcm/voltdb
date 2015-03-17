@@ -48,6 +48,11 @@ public class TestGeoFunctions extends RegressionSuite {
                 + "\"type\": \"Point\","
                 + "\"coordinates\": [0.5, 0.75]"
                 + "}");
+        client.callProcedure("points.Insert", 1, "Danzig",
+                "{"
+                + "\"type\": \"Point\","
+                + "\"coordinates\": [1.5, 0.75]"
+                + "}");
 
         client.callProcedure("regions.Insert", 0, "the building",
                 "{\n"
@@ -57,13 +62,21 @@ public class TestGeoFunctions extends RegressionSuite {
                 + "]\n"
                 + "}\n");
 
+        client.callProcedure("regions.Insert", 1, "the building next door",
+                "{\n"
+                + "\"type\": \"Polygon\",\n"
+                + "\"coordinates\": [\n"
+                + "[[1.0, 0.0], [1.0, 1.0], [2.0, 1.0], [2.0, 0.0], [1.0, 0.0]]\n"
+                + "]\n"
+                + "}\n");
+
         VoltTable vt = client.callProcedure("@AdHoc",
-                "select pts.id "
+                "select pts.name || ' is in ' || regs.name "
                 + "from points as pts "
                 + "inner join regions as regs "
-                + "on geo_within(pts.geom, regs.geom) = 1"
-                        )
+                + "on geo_within(pts.geom, regs.geom) = 1")
                 .getResults()[0];
+        assertEquals(2, vt.getRowCount());
         System.out.println(vt);
     }
 
