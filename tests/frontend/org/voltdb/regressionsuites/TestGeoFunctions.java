@@ -60,15 +60,15 @@ public class TestGeoFunctions extends RegressionSuite {
 
         client.callProcedure("regions.Insert", 1, "Colorado",
                 "{\n"
-                + "\"type\": \"Polygon\",\n"
+                + "\"type\": \"MultiPolygon\",\n"
                 + "\"coordinates\": [\n"
-                + "  ["
+                + "  [["
                 + "    [-109.032233, 40.983839], "
                 + "    [-102.020617, 40.986844], "
                 + "    [-102.023014, 37.000261], "
                 + "    [-109.031208, 36.999322], "
                 + "    [-109.032233, 40.983839] "
-                + "  ]\n"
+                + "  ]]\n"
                 + "]\n"
                 + "}\n");
 

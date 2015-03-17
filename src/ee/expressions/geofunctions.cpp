@@ -24,6 +24,8 @@
 #include <boost/geometry/geometries/adapted/boost_tuple.hpp>
 #include <boost/geometry/geometries/point_xy.hpp>
 #include <boost/geometry/geometries/polygon.hpp>
+#include <boost/geometry/multi/algorithms/append.hpp>
+#include <boost/geometry/multi/geometries/multi_polygon.hpp>
 #include <vector>
 
 #include "common/NValue.hpp"
@@ -38,23 +40,24 @@ namespace bg = boost::geometry;
 typedef bg::cs::geographic<bg::degree> CoordSys;
 
 // Points are defined using doubles
-typedef bg::model::point<double, 2, CoordSys> Point;
+//typedef bg::model::point<double, 2, CoordSys> Point;
+typedef bg::model::d2::point_xy<double, CoordSys> Point;
 
 typedef bg::model::polygon<Point> Polygon;
+typedef bg::model::multi_polygon<Polygon> MultiPolygon;
 
-static void throwGeoJsonFormattingError(const std::string& geoJson) {
-    char msg[1024];
-    snprintf(msg, sizeof(msg), "Invalid GeoJSON: %s", geoJson.c_str());
-    throw SQLException(SQLException::data_exception_invalid_parameter, msg);
+static void throwGeoJsonFormattingError(const std::string& geoJson, const std::string& msg) {
+    char exMsg[1024];
+    snprintf(exMsg, sizeof(exMsg), "Invalid GeoJSON: %s in %s", msg.c_str(), geoJson.c_str());
+    throw SQLException(SQLException::data_exception_invalid_parameter, exMsg);
 }
 
-static Point geoJsonToPoint(const char* geoJsonStr, int32_t len) {
+static Point geoJsonToPoint(const std::string& geoJsonStr, const PlannerDomValue& root) {
 
-    PlannerDomRoot domRoot(geoJsonStr);
-    PlannerDomValue root = domRoot.rootObject();
     std::string geometryType = root.valueForKey("type").asStr();
     if (! boost::iequals("Point", geometryType)) {
-        throwGeoJsonFormattingError(geoJsonStr);
+        throwGeoJsonFormattingError(geoJsonStr.c_str(),
+                                    "expected value of \"type\" to be \"Point\"");
     }
 
     PlannerDomValue coords = root.valueForKey("coordinates");
@@ -64,15 +67,7 @@ static Point geoJsonToPoint(const char* geoJsonStr, int32_t len) {
     return Point(xCoord, yCoord);
 }
 
-static Polygon geoJsonToPolygon(const char* geoJsonStr, int32_t len) {
-
-    PlannerDomRoot domRoot(geoJsonStr);
-    PlannerDomValue root = domRoot.rootObject();
-
-    std::string geometryType = root.valueForKey("type").asStr();
-    if (! boost::iequals("Polygon", geometryType)) {
-        throwGeoJsonFormattingError(geoJsonStr);
-    }
+static Polygon geoJsonToPolygon(const char* geoJsonStr, const PlannerDomValue& root) {
 
     // A GeoJSON polygon is an array of rings, which is an array of
     // points, which is a 2-element array of coordinates.
@@ -102,6 +97,71 @@ static Polygon geoJsonToPolygon(const char* geoJsonStr, int32_t len) {
     return poly;
 }
 
+// static void debugPoly(const Polygon& poly) {
+//     std::cout << "Polygon: [\n";
+//     for (auto p : poly.outer()) {
+//         std::cout << "  (" << p.x() << ", " << p.y() << ")\n";
+//     }
+//     std::cout << "]\n";
+
+//     if (! poly.inners().empty()) {
+//         std::cout << "Inner rings:\n";
+//         for (auto inner : poly.inners()) {
+//             std::cout << "[\n";
+//             for (auto p : inner) {
+//                 std::cout << "  (" << p.x() << ", " << p.y() << ")\n";
+//             }
+//             std::cout << "[\n";
+//         }
+//     }
+// }
+
+static MultiPolygon geoJsonToMultiPolygon(const char* geoJsonStr, const PlannerDomValue& root) {
+    MultiPolygon multiPoly;
+
+    PlannerDomValue polys = root.valueForKey("coordinates");
+    int numPolys = polys.arrayLen();
+    for (int i = 0; i < numPolys; ++i) {
+
+        PlannerDomValue rings = polys.valueAtIndex(i);
+        int numRings = rings.arrayLen();
+        assert(numRings >= 1); // for now only support one ring: the outer one.
+
+        Polygon poly;
+        for (int ringIdx = 0; ringIdx < numRings; ++ringIdx) {
+
+            PlannerDomValue ring = rings.valueAtIndex(ringIdx);
+            int numPoints = ring.arrayLen();
+            for (int j = 0; j < numPoints; ++j) {
+                double x = ring.valueAtIndex(j).valueAtIndex(0).asDouble();
+                double y = ring.valueAtIndex(j).valueAtIndex(1).asDouble();
+                if (ringIdx == 0) {
+                    // the outer ring
+                    bg::append(poly, Point(x, y));
+                }
+                else {
+                    // an inner ring
+                    bg::append(poly, Point(x, y), ringIdx - 1);
+                }
+            }
+        }
+
+        multiPoly.push_back(poly);
+    }
+
+    for (auto poly : multiPoly) {
+        debugPoly(poly);
+    }
+
+    return multiPoly;
+}
+
+static std::string geometryType(const std::string& geoJsonStr, const PlannerDomValue &domVal) {
+    if (! domVal.hasKey("type"))
+        throwGeoJsonFormattingError(geoJsonStr, "did not find key \"type\"");
+    return domVal.valueForKey("type").asStr();
+}
+
 template<> NValue NValue::call<FUNC_VOLT_GEO_WITHIN>(const std::vector<NValue>& arguments) {
 
     assert(arguments.size() == 2);
@@ -121,15 +181,29 @@ template<> NValue NValue::call<FUNC_VOLT_GEO_WITHIN>(const std::vector<NValue>& 
         return NValue::getNullValue(VALUE_TYPE_INTEGER);
 
     const char* jsonStrPoint = reinterpret_cast<char*>(nvalPoint.getObjectValue_withoutNull());
-    int32_t len = nvalPoint.getObjectLength_withoutNull();
-    Point pt = geoJsonToPoint(jsonStrPoint, len);
+    PlannerDomRoot pdrPoint(jsonStrPoint);
+    PlannerDomValue pdvPoint = pdrPoint.rootObject();
+    assert (boost::iequals(geometryType(jsonStrPoint, pdvPoint), "point"));
+    Point pt = geoJsonToPoint(jsonStrPoint, pdvPoint);
 
     const char* jsonStrPoly = reinterpret_cast<char*>(nvalPoly.getObjectValue_withoutNull());
-    len = nvalPoly.getObjectLength_withoutNull();
-    Polygon poly = geoJsonToPolygon(jsonStrPoly, len);
+    PlannerDomRoot pdrPoly(jsonStrPoly);
+    PlannerDomValue pdvPoly = pdrPoly.rootObject();
+
+    bool b;
+
+    // It could be a polygon or multi-polygon
+    if (boost::iequals(geometryType(jsonStrPoly, pdvPoly), "Polygon")) {
+        Polygon poly = geoJsonToPolygon(jsonStrPoly, pdvPoly);
+        b = bg::within(pt, poly);
+    }
+    else {
+        assert(boost::iequals(geometryType(jsonStrPoly, pdvPoly), "MultiPolygon"));
+        MultiPolygon multiPoly = geoJsonToMultiPolygon(jsonStrPoly, pdvPoly);
+        b = bg::within(pt, multiPoly);
+    }
 
     NValue result(VALUE_TYPE_INTEGER);
-    bool b = bg::within(pt, poly);
     if (b) {
         result.getInteger() = 1;
     }
