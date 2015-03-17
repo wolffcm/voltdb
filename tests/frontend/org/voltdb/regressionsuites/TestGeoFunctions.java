@@ -43,6 +43,20 @@ public class TestGeoFunctions extends RegressionSuite {
     public void testGeoWithin() throws Exception {
         Client client = getClient();
 
+        client.callProcedure("points.Insert", 0, "Elvis",
+                "{"
+                + "\"type\": \"Point\","
+                + "\"coordinates\": [0.5, 0.75]"
+                + "}");
+
+        client.callProcedure("regions.Insert", 0, "the building",
+                "{\n"
+                + "\"type\": \"Polygon\",\n"
+                + "\"coordinates\": [\n"
+                + "[[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]]\n"
+                + "]\n"
+                + "}\n");
+
         VoltTable vt = client.callProcedure("@AdHoc",
                 "select pts.id "
                 + "from points as pts "
