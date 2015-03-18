@@ -39,8 +39,8 @@ import org.voltdb.client.ClientConfig;
 import org.voltdb.client.ClientFactory;
 import org.voltdb.client.ClientResponse;
 import org.voltdb.client.ProcCallException;
-import org.voltdb.compiler.CatalogBuilder;
-import org.voltdb.compiler.DeploymentBuilder;
+import org.voltdb.compiler.Cataloginator;
+import org.voltdb.compiler.Deploymentinator;
 import org.voltdb.compiler.VoltProjectBuilder;
 import org.voltdb.utils.MiscUtils;
 
@@ -51,7 +51,7 @@ public class TestLiveTableSchemaMigration extends TestCase {
      * that table on disk.
      */
     String catalogPathForTable(VoltTable t, String jarname) throws IOException {
-        CatalogBuilder builder = new CatalogBuilder();
+        Cataloginator builder = new Cataloginator();
         String ddl = TableHelper.ddlForTable(t);
         builder.addLiteralSchema(ddl);
         String retval = Configuration.getPathToCatalogForTest(jarname);
@@ -85,7 +85,7 @@ public class TestLiveTableSchemaMigration extends TestCase {
             String catPath2 = catalogPathForTable(t2, "t2.jar");
             byte[] catBytes2 = MiscUtils.fileToBytes(new File(catPath2));
 
-            DeploymentBuilder depBuilder = new DeploymentBuilder(1, 1, 0);
+            Deploymentinator depBuilder = new Deploymentinator(1, 1, 0);
             depBuilder.setVoltRoot("/tmp/foobar");
             // disable logging
             depBuilder.configureLogging("/tmp/foobar", "/tmp/foobar", false, false, 1, 1, 3);
@@ -161,7 +161,7 @@ public class TestLiveTableSchemaMigration extends TestCase {
 
             String catPath1 = catalogPathForTable(t1, "t1.jar");
 
-            DeploymentBuilder depBuilder = new DeploymentBuilder(1, 1, 0);
+            Deploymentinator depBuilder = new Deploymentinator(1, 1, 0);
             depBuilder.setVoltRoot("/tmp/foobar");
             depBuilder.setUseDDLSchema(true);
             // disable logging

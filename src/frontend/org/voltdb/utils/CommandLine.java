@@ -387,6 +387,11 @@ public class CommandLine extends VoltDB.Configuration
         return this;
     }
 
+    public CommandLine tag(String tag) {
+        m_tag = tag;
+        return this;
+    }
+
     // user-customizable string appeneded to commandline.
     // useful to allow customization of VEM/REST cmdlns.
     // Please don't abuse this by shoving lots of long-term

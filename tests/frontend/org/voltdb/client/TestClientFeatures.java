@@ -39,27 +39,27 @@ import org.voltdb.TableHelper;
 import org.voltdb.VoltDB;
 import org.voltdb.VoltDB.Configuration;
 import org.voltdb.VoltTable;
-import org.voltdb.compiler.CatalogBuilder;
-import org.voltdb.compiler.DeploymentBuilder;
+import org.voltdb.compiler.Cataloginator;
+import org.voltdb.compiler.Deploymentinator;
 import org.voltdb.utils.MiscUtils;
 
 public class TestClientFeatures extends TestCase {
 
     ServerThread localServer;
-    DeploymentBuilder depBuilder;
+    Deploymentinator depBuilder;
 
     @Override
     public void setUp()
     {
         try {
-            CatalogBuilder catBuilder = new CatalogBuilder();
+            Cataloginator catBuilder = new Cataloginator();
             catBuilder.addSchema(getClass().getResource("clientfeatures.sql"));
             catBuilder.addProcedures(ArbitraryDurationProc.class);
 
             boolean success = catBuilder.compile(Configuration.getPathToCatalogForTest("timeouts.jar"));
             assert(success);
 
-            depBuilder = new DeploymentBuilder(1, 1, 0);
+            depBuilder = new Deploymentinator(1, 1, 0);
             depBuilder.writeXML(Configuration.getPathToCatalogForTest("timeouts.xml"));
 
             VoltDB.Configuration config = new VoltDB.Configuration();
@@ -128,7 +128,7 @@ public class TestClientFeatures extends TestCase {
 
         if (MiscUtils.isPro()) {
             // build a catalog with a ton of indexes so catalog update will be slow
-            CatalogBuilder builder = new CatalogBuilder();
+            Cataloginator builder = new Cataloginator();
             builder.addSchema(getClass().getResource("clientfeatures-wellindexed.sql"));
             builder.addProcedures(ArbitraryDurationProc.class);
             byte[] catalogToUpdate = builder.compileToBytes();

@@ -983,14 +983,7 @@ public class TestVoltCompiler extends TestCase {
             final String jarPath,
             final String... schemaPaths)
     {
-        try {
-            return compiler.compileFromDDL(jarPath, schemaPaths);
-        }
-        catch (VoltCompilerException e) {
-            e.printStackTrace();
-            fail();
-            return false;
-        }
+        return compiler.compileFromDDL(jarPath, schemaPaths);
     }
 
     public void testDDLTableTooManyColumns() throws IOException {

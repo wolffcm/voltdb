@@ -31,8 +31,8 @@ import org.voltdb.client.Client;
 import org.voltdb.client.ClientConfig;
 import org.voltdb.client.ClientFactory;
 import org.voltdb.client.ProcCallException;
-import org.voltdb.compiler.DeploymentBuilder;
-import org.voltdb.compiler.DeploymentBuilder.UserInfo;
+import org.voltdb.compiler.Deploymentinator;
+import org.voltdb.compiler.Deploymentinator.UserInfo;
 import org.voltdb.compiler.VoltProjectBuilder;
 
 public class TestAdhocCreateDropRole extends AdhocDDLTestBase {
@@ -49,7 +49,7 @@ public class TestAdhocCreateDropRole extends AdhocDDLTestBase {
         String pathToDeployment = Configuration.getPathToCatalogForTest("adhocddl.xml");
         VoltProjectBuilder builder = new VoltProjectBuilder();
         // Need to parallel dbuilder as we modify builder
-        DeploymentBuilder dbuilder = new DeploymentBuilder(2, 1, 0);
+        Deploymentinator dbuilder = new Deploymentinator(2, 1, 0);
         builder.addLiteralSchema(
                 "create table FOO (" +
                 "ID integer not null," +
@@ -65,8 +65,8 @@ public class TestAdhocCreateDropRole extends AdhocDDLTestBase {
         builder.addPartitionInfo("FOO", "ID");
         dbuilder.setUseDDLSchema(true);
         // Use random caps in role names to check case-insensitivity
-        dbuilder.addUsers(new DeploymentBuilder.UserInfo[]
-                {new DeploymentBuilder.UserInfo("admin", "admin", new String[] {"Administrator"})});
+        dbuilder.addUsers(new Deploymentinator.UserInfo[]
+                {new Deploymentinator.UserInfo("admin", "admin", new String[] {"Administrator"})});
         dbuilder.setSecurityEnabled(true);
         dbuilder.setEnableCommandLogging(false);
         boolean success = builder.compile(pathToCatalog, 2, 1, 0);

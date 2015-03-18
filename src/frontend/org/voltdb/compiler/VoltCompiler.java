@@ -118,7 +118,7 @@ public class VoltCompiler {
     public final static boolean DEBUG_MODE = System.getProperties().contains("compilerdebug");
 
     // was this voltcompiler instantiated in a main(), or as part of VoltDB
-    public final boolean standaloneCompiler;
+    private final boolean m_standaloneCompiler;
 
     // tables that change between the previous compile and this one
     // used for Live-DDL caching of plans
@@ -186,6 +186,9 @@ public class VoltCompiler {
             this.fileName = fileName;
             this.lineNo = lineNo;
         }
+
+        @Override
+        public String toString() { return getStandardFeedbackLine(); }
 
         public String getStandardFeedbackLine() {
             String retval = "";
@@ -354,14 +357,16 @@ public class VoltCompiler {
     }
 
     /** Passing true to constructor indicates the compiler is being run in standalone mode */
-    public VoltCompiler(boolean standaloneCompiler) {
-        this.standaloneCompiler = standaloneCompiler;
+    private VoltCompiler(boolean standaloneCompiler) {
+        m_standaloneCompiler = standaloneCompiler;
     }
 
     /** Parameterless constructor is for embedded VoltCompiler use only. */
     public VoltCompiler() {
-        this(false);
+        m_standaloneCompiler = false;
     }
+
+    public boolean isStandAloneCompiler() { return m_standaloneCompiler; }
 
     public boolean hasErrors() {
         return m_errors.size() > 0;
@@ -386,7 +391,7 @@ public class VoltCompiler {
     void addInfo(final String msg, final int lineNo) {
         final Feedback fb = new Feedback(Severity.INFORMATIONAL, msg, m_currentFilename, lineNo);
         m_infos.add(fb);
-        if (standaloneCompiler) {
+        if (m_standaloneCompiler) {
             compilerLog.info(fb.getLogString());
         }
         else {
@@ -417,7 +422,6 @@ public class VoltCompiler {
     public boolean compileFromDDL(
             final String jarOutputPath,
             final String... ddlFilePaths)
-                    throws VoltCompilerException
     {
         return compileWithProjectXML(null, jarOutputPath, ddlFilePaths);
     }
@@ -623,7 +627,7 @@ public class VoltCompiler {
             File file = null;
 
             // write to working dir when using VoltCompiler directly
-            if (standaloneCompiler) {
+            if (m_standaloneCompiler) {
                 file = new File("catalog-report.html");
             }
             else {
@@ -1715,7 +1719,7 @@ public class VoltCompiler {
         boolean success = false;
         if (args.length > 0 && args[0].toLowerCase().endsWith(".jar")) {
             // The first argument is *.jar for the new syntax.
-            if (args.length >= 2) {
+            if (args.length > 1) {
                 // Check for accidental .jar or .xml files specified for argument 2
                 // to catch accidental incomplete use of the legacy syntax.
                 if (args[1].toLowerCase().endsWith(".xml") || args[1].toLowerCase().endsWith(".jar")) {
@@ -1723,11 +1727,7 @@ public class VoltCompiler {
                                      + "      .xml and .jar are invalid DDL file extensions.");
                     System.exit(-1);
                 }
-                try {
-                    success = compiler.compileFromDDL(args[0], ArrayUtils.subarray(args, 1, args.length));
-                } catch (VoltCompilerException e) {
-                    System.err.printf("Compiler exception: %s\n", e.getMessage());
-                }
+                success = compiler.compileFromDDL(args[0], ArrayUtils.subarray(args, 1, args.length));
             }
             else {
                 System.err.printf("Usage: %s\n", usageNew);
@@ -2422,6 +2422,10 @@ public class VoltCompiler {
             }
         }
         return upgradedFromVersion;
+    }
+
+    public static VoltCompiler standAloneCompilerForTest() {
+        return new VoltCompiler(true);
     }
 
     /**

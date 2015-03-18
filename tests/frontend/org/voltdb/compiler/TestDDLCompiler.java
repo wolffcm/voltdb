@@ -39,7 +39,6 @@ import org.voltdb.benchmark.tpcc.TPCCProjectBuilder;
 import org.voltdb.catalog.Catalog;
 import org.voltdb.catalog.Database;
 import org.voltdb.catalog.Table;
-import org.voltdb.compiler.VoltCompiler.VoltCompilerException;
 import org.voltdb.compilereport.TableAnnotation;
 
 public class TestDDLCompiler extends TestCase {
@@ -239,14 +238,7 @@ public class TestDDLCompiler extends TestCase {
 
         // compile and fail on bad import
         VoltCompiler compiler = new VoltCompiler();
-        try {
-            return compiler.compileFromDDL(jarOut.getPath(), schemaFile.getPath());
-        }
-        catch (VoltCompilerException e) {
-            e.printStackTrace();
-            fail();
-            return false;
-        }
+        return compiler.compileFromDDL(jarOut.getPath(), schemaFile.getPath());
     }
 
     public void testExtraClasses() {
@@ -282,17 +274,9 @@ public class TestDDLCompiler extends TestCase {
 
         // compile and fail on bad import
         VoltCompiler compiler = new VoltCompiler();
-        try {
-            boolean rslt = compiler.compileFromDDL(jarOut.getPath(), schemaFile1.getPath(), schemaFile2.getPath());
-            assertTrue(checkWarn^compiler.m_warnings.isEmpty());
-            return rslt;
-        }
-        catch (VoltCompilerException e) {
-            e.printStackTrace();
-            fail();
-            assertTrue(checkWarn^compiler.m_warnings.isEmpty());
-            return false;
-        }
+        boolean rslt = compiler.compileFromDDL(jarOut.getPath(), schemaFile1.getPath(), schemaFile2.getPath());
+        assertTrue(checkWarn^compiler.m_warnings.isEmpty());
+        return rslt;
     }
 
     public void testExtraClassesFrom2Ddls() {

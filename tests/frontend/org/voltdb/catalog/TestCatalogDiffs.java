@@ -32,7 +32,7 @@ import junit.framework.TestCase;
 import org.voltdb.TableHelper;
 import org.voltdb.VoltTable;
 import org.voltdb.benchmark.tpcc.TPCCProjectBuilder;
-import org.voltdb.compiler.CatalogBuilder;
+import org.voltdb.compiler.Cataloginator;
 import org.voltdb.compiler.VoltProjectBuilder;
 import org.voltdb.compiler.VoltProjectBuilder.RoleInfo;
 import org.voltdb.compiler.VoltProjectBuilder.UserInfo;
@@ -404,7 +404,7 @@ public class TestCatalogDiffs extends TestCase {
     }
 
     private Catalog getCatalogForTable(String tableName, String catname, VoltTable t, boolean export) throws IOException {
-        CatalogBuilder builder = new CatalogBuilder();
+        Cataloginator builder = new Cataloginator();
         builder.addLiteralSchema(TableHelper.ddlForTable(t));
         if (export) {
             builder.addLiteralSchema("EXPORT TABLE " + TableHelper.getTableName(t) + ";");
