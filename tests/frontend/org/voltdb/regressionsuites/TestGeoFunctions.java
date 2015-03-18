@@ -93,7 +93,7 @@ public class TestGeoFunctions extends RegressionSuite {
                 "select pts.name || ' is within ' || regs.name "
                 + "from points as pts "
                 + "inner join regions as regs "
-                + "on geo_within(pts.geom, regs.geom) = 1"
+                + "on geo_within(pts.geo_json, regs.geo_json) = 1"
                 + "order by pts.id")
                 .getResults()[0];
         assertEquals(2, vt.getRowCount());
@@ -122,13 +122,13 @@ public class TestGeoFunctions extends RegressionSuite {
                 "create table regions (\n" +
                 "  id integer primary key,\n" +
                 "  name varchar(64) not null,\n" +
-                "  geom varchar(512)\n" +
+                "  geo_json varchar(512)\n" +
                 ");\n" +
                 "\n" +
                 "create table points (\n" +
                 "  id integer primary key,\n" +
                 "  name varchar(64) not null,\n" +
-                "  geom varchar(512)\n" +
+                "  geo_json varchar(512)\n" +
                 ");\n";
         try {
             project.addLiteralSchema(literalSchema);
