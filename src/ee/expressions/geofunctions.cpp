@@ -52,20 +52,20 @@ static void throwGeoJsonFormattingError(const std::string& geoJson, const std::s
     throw SQLException(SQLException::data_exception_invalid_parameter, exMsg);
 }
 
-static Point geoJsonToPoint(const std::string& geoJsonStr, const PlannerDomValue& root) {
+// static Point geoJsonToPoint(const std::string& geoJsonStr, const PlannerDomValue& root) {
 
-    std::string geometryType = root.valueForKey("type").asStr();
-    if (! boost::iequals("Point", geometryType)) {
-        throwGeoJsonFormattingError(geoJsonStr.c_str(),
-                                    "expected value of \"type\" to be \"Point\"");
-    }
+//     std::string geometryType = root.valueForKey("type").asStr();
+//     if (! boost::iequals("Point", geometryType)) {
+//         throwGeoJsonFormattingError(geoJsonStr.c_str(),
+//                                     "expected value of \"type\" to be \"Point\"");
+//     }
 
-    PlannerDomValue coords = root.valueForKey("coordinates");
-    double xCoord = coords.valueAtIndex(0).asDouble();
-    double yCoord = coords.valueAtIndex(1).asDouble();
+//     PlannerDomValue coords = root.valueForKey("coordinates");
+//     double xCoord = coords.valueAtIndex(0).asDouble();
+//     double yCoord = coords.valueAtIndex(1).asDouble();
 
-    return Point(xCoord, yCoord);
-}
+//     return Point(xCoord, yCoord);
+// }
 
 static Polygon geoJsonToPolygon(const char* geoJsonStr, const PlannerDomValue& root) {
 
@@ -149,9 +149,9 @@ static MultiPolygon geoJsonToMultiPolygon(const char* geoJsonStr, const PlannerD
         multiPoly.push_back(poly);
     }
 
-    for (auto poly : multiPoly) {
-        debugPoly(poly);
-    }
+    // for (auto poly : multiPoly) {
+    //     debugPoly(poly);
+    // }
 
     return multiPoly;
 }
@@ -183,8 +183,11 @@ template<> NValue NValue::call<FUNC_VOLT_GEO_WITHIN>(const std::vector<NValue>& 
     const char* jsonStrPoint = reinterpret_cast<char*>(nvalPoint.getObjectValue_withoutNull());
     PlannerDomRoot pdrPoint(jsonStrPoint);
     PlannerDomValue pdvPoint = pdrPoint.rootObject();
-    assert (boost::iequals(geometryType(jsonStrPoint, pdvPoint), "point"));
-    Point pt = geoJsonToPoint(jsonStrPoint, pdvPoint);
+    //assert (boost::iequals(geometryType(jsonStrPoint, pdvPoint), "Point"));
+    /*Point pt = */ //geoJsonToPoint(jsonStrPoint, pdvPoint);
+    MultiPolygon mp = geoJsonToMultiPolygon(jsonStrPoint, pdvPoint);
+    Point pt;
+    bg::centroid(mp, pt, bg::strategy::centroid::bashein_detmer<Point>());
 
     const char* jsonStrPoly = reinterpret_cast<char*>(nvalPoly.getObjectValue_withoutNull());
     PlannerDomRoot pdrPoly(jsonStrPoly);
