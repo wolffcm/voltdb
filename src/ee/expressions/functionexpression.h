@@ -241,6 +241,7 @@ static const int FUNC_VOLT_SET_FIELD                   = 20024;
 static const int FUNC_VOLT_FORMAT_CURRENCY             = 20025;
 
 static const int FUNC_VOLT_GEO_WITHIN                  = 20026;
+static const int FUNC_VOLT_GEO_AREA                    = 20027;
 }
 
 // All of these "...functions.h" files need to be included AFTER the above definitions

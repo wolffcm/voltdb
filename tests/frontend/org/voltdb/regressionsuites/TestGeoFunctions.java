@@ -40,6 +40,44 @@ import org.voltdb_testprocs.regressionsuites.fixedsql.Insert;
 
 public class TestGeoFunctions extends RegressionSuite {
 
+    public void testGeoArea() throws Exception {
+        Client client = getClient();
+        client.callProcedure("regions.Insert", 0, "Square",
+                "{\n"
+                + "\"type\": \"Polygon\",\n"
+                + "\"coordinates\": [\n"
+                + "  ["
+                + "    [0, 0], "
+                + "    [0, 1], "
+                + "    [1, 1], "
+                + "    [1, 0], "
+                + "    [0, 0] "
+                + "  ]\n"
+                + "]\n"
+                + "}\n");
+
+        client.callProcedure("regions.Insert", 1, "rectangle",
+                "{\n"
+                + "\"type\": \"Polygon\",\n"
+                + "\"coordinates\": [\n"
+                + "  ["
+                + "    [0, 0], "
+                + "    [0, 1], "
+                + "    [2, 1], "
+                + "    [2, 0], "
+                + "    [0, 0] "
+                + "  ]\n"
+                + "]\n"
+                + "}\n");
+
+        VoltTable vt = client.callProcedure("@AdHoc",
+                "select name, geo_area(geo_json) "
+                + "from regions "
+                + "order by name asc")
+                .getResults()[0];
+        System.out.println(vt);
+    }
+
     public void testGeoWithin() throws Exception {
         Client client = getClient();
 

@@ -23,6 +23,7 @@
 namespace voltdb {
 
 template<> NValue NValue::call<FUNC_VOLT_GEO_WITHIN>(const std::vector<NValue>& arguments);
+template<> NValue NValue::callUnary<FUNC_VOLT_GEO_AREA>() const;
 
 } // end namespace voltdb
 

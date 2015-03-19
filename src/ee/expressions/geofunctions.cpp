@@ -21,6 +21,7 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/geometry.hpp>
 #include <boost/geometry/algorithms/append.hpp>
+#include <boost/geometry/algorithms/area.hpp>
 #include <boost/geometry/algorithms/correct.hpp>
 #include <boost/geometry/algorithms/within.hpp>
 #include <boost/geometry/core/cs.hpp>
@@ -38,7 +39,6 @@ namespace voltdb {
 
 namespace bg = boost::geometry;
 
-// Use latitude/longitude coords, specified in degrees
 typedef bg::cs::spherical_equatorial<bg::degree> CoordSys;
 
 // Points are defined using doubles
@@ -217,6 +217,38 @@ template<> NValue NValue::call<FUNC_VOLT_GEO_WITHIN>(const std::vector<NValue>& 
 
     return result;
 }
+
+    template<> NValue NValue::callUnary<FUNC_VOLT_GEO_AREA>() const {
+
+        if (getValueType() != VALUE_TYPE_VARCHAR) {
+            throwCastSQLException(getValueType(), VALUE_TYPE_VARCHAR);
+        }
+
+        if (isNull())
+            return NValue::getNullValue(VALUE_TYPE_INTEGER);
+
+        const char* jsonStrPoly = reinterpret_cast<char*>(getObjectValue_withoutNull());
+        PlannerDomRoot pdrPoly(jsonStrPoly);
+        PlannerDomValue pdvPoly = pdrPoly.rootObject();
+
+        double area;
+
+        // It could be a polygon or multi-polygon
+        if (boost::iequals(geometryType(jsonStrPoly, pdvPoly), "Polygon")) {
+            Polygon poly = geoJsonToPolygon(jsonStrPoly, pdvPoly);
+            area = bg::area(poly);
+        }
+        else {
+            assert(boost::iequals(geometryType(jsonStrPoly, pdvPoly), "MultiPolygon"));
+            MultiPolygon multiPoly = geoJsonToMultiPolygon(jsonStrPoly, pdvPoly);
+            area = bg::area(multiPoly);
+        }
+
+        NValue result(VALUE_TYPE_DOUBLE);
+        result.getDouble() = area;
+
+        return result;
+    }
 
     // Interesting geo functions:
     //   area

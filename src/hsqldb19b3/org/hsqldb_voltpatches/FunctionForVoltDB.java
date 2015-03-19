@@ -122,6 +122,7 @@ public class FunctionForVoltDB extends FunctionSQL {
         static final int FUNC_VOLT_FORMAT_CURRENCY        = 20025;
 
         static final int FUNC_VOLT_GEO_WITHIN             = 20026;
+        static final int FUNC_VOLT_GEO_AREA               = 20027;
 
         static final int FUNC_CONCAT                      = 124;
 
@@ -157,6 +158,11 @@ public class FunctionForVoltDB extends FunctionSQL {
                     new Type[] { Type.SQL_VARCHAR, Type.SQL_VARCHAR },
                     new short[] { Tokens.OPENBRACKET, Tokens.QUESTION,
                                   Tokens.COMMA, Tokens.QUESTION,
+                                  Tokens.CLOSEBRACKET }),
+
+            new FunctionId("geo_area", Type.SQL_DOUBLE, FUNC_VOLT_GEO_AREA, -1,
+                    new Type[] { Type.SQL_VARCHAR, Type.SQL_VARCHAR },
+                    new short[] { Tokens.OPENBRACKET, Tokens.QUESTION,
                                   Tokens.CLOSEBRACKET }),
 
             new FunctionId("array_element", Type.SQL_VARCHAR, FUNC_VOLT_ARRAY_ELEMENT, -1,

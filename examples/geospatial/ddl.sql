@@ -1,4 +1,4 @@
-
+file -inlinebatch EOF
 -- With population of at least 100,000
 create table us_cities (
        id integer not null primary key,
@@ -15,6 +15,13 @@ create table us_states (
        name varchar(128) not null,
        geo_json varchar(500000 bytes) not null
 );
+
+
+-- radius of earth is 3959 miles;
+create procedure areaOfState as
+       select name, geo_area(geo_json) * 3959*3959 as area_in_miles
+       from us_states
+       where name = ?;
 
 create procedure citiesInState as
        select us_cities.name, us_cities.population
@@ -40,3 +47,4 @@ create procedure populationPerState as
          on geo_within(us_cities.geo_json, us_states.geo_json) = 1
        group by us_states.name
        order by population desc;
+EOF
