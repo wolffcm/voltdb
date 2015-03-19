@@ -16,9 +16,12 @@
  */
 
 #include <cassert>
+#include <vector>
+
 #include <boost/algorithm/string.hpp>
 #include <boost/geometry.hpp>
 #include <boost/geometry/algorithms/append.hpp>
+#include <boost/geometry/algorithms/correct.hpp>
 #include <boost/geometry/algorithms/within.hpp>
 #include <boost/geometry/core/cs.hpp>
 #include <boost/geometry/geometries/adapted/boost_tuple.hpp>
@@ -26,7 +29,6 @@
 #include <boost/geometry/geometries/polygon.hpp>
 #include <boost/geometry/multi/algorithms/append.hpp>
 #include <boost/geometry/multi/geometries/multi_polygon.hpp>
-#include <vector>
 
 #include "common/NValue.hpp"
 #include "common/PlannerDomValue.h"
@@ -37,7 +39,7 @@ namespace voltdb {
 namespace bg = boost::geometry;
 
 // Use latitude/longitude coords, specified in degrees
-typedef bg::cs::geographic<bg::degree> CoordSys;
+typedef bg::cs::spherical_equatorial<bg::degree> CoordSys;
 
 // Points are defined using doubles
 //typedef bg::model::point<double, 2, CoordSys> Point;
@@ -152,6 +154,8 @@ static MultiPolygon geoJsonToMultiPolygon(const char* geoJsonStr, const PlannerD
     // for (auto poly : multiPoly) {
     //     debugPoly(poly);
     // }
+
+    bg::correct(multiPoly);
 
     return multiPoly;
 }

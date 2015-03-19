@@ -16,10 +16,27 @@ create table us_states (
        geo_json varchar(500000 bytes) not null
 );
 
-create procedure citiesPerState as
+create procedure citiesInState as
+       select us_cities.name, us_cities.population
+       from us_states
+         inner join us_cities
+         on geo_within(us_cities.geo_json, us_states.geo_json) = 1
+       where us_states.name = ?
+       order by us_cities.population desc;
+
+create procedure numCitiesPerState as
        select us_states.name, count(*)
        from us_states
          inner join us_cities
          on geo_within(us_cities.geo_json, us_states.geo_json) = 1
        group by us_states.name
        order by count(*) desc;
+
+create procedure populationPerState as
+       select us_states.name as state,
+              sum(us_cities.population) as population
+       from us_states
+         inner join us_cities
+         on geo_within(us_cities.geo_json, us_states.geo_json) = 1
+       group by us_states.name
+       order by population desc;
