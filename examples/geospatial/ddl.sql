@@ -17,7 +17,8 @@ create table us_states (
 );
 
 
--- radius of earth is 3959 miles;
+-- radius of earth is 3959 miles
+
 create procedure areaOfState as
        select name, geo_area(geo_json) * 3959*3959 as area_in_miles
        from us_states

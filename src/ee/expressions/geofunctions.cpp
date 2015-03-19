@@ -33,6 +33,7 @@
 
 #include "common/NValue.hpp"
 #include "common/PlannerDomValue.h"
+#include "common/ValuePeeker.hpp"
 #include "expressions/geofunctions.h"
 
 namespace voltdb {
@@ -48,18 +49,17 @@ typedef bg::model::d2::point_xy<double, CoordSys> Point;
 typedef bg::model::polygon<Point> Polygon;
 typedef bg::model::multi_polygon<Polygon> MultiPolygon;
 
-static void throwGeoJsonFormattingError(const std::string& geoJson, const std::string& msg) {
+static void throwGeoJsonFormattingError(const std::string& msg) {
     char exMsg[1024];
-    snprintf(exMsg, sizeof(exMsg), "Invalid GeoJSON: %s in %s", msg.c_str(), geoJson.c_str());
+    snprintf(exMsg, sizeof(exMsg), "Invalid GeoJSON: %s", msg.c_str());
     throw SQLException(SQLException::data_exception_invalid_parameter, exMsg);
 }
 
-static Point geoJsonToPoint(const std::string& geoJsonStr, const PlannerDomValue& root) {
+static Point geoJsonToPoint(const PlannerDomValue& root) {
 
     std::string geometryType = root.valueForKey("type").asStr();
     if (! boost::iequals("Point", geometryType)) {
-        throwGeoJsonFormattingError(geoJsonStr.c_str(),
-                                    "expected value of \"type\" to be \"Point\"");
+        throwGeoJsonFormattingError("expected value of \"type\" to be \"Point\"");
     }
 
     PlannerDomValue coords = root.valueForKey("coordinates");
@@ -69,7 +69,7 @@ static Point geoJsonToPoint(const std::string& geoJsonStr, const PlannerDomValue
     return Point(xCoord, yCoord);
 }
 
-static Polygon geoJsonToPolygon(const char* geoJsonStr, const PlannerDomValue& root) {
+static Polygon geoJsonToPolygon(const PlannerDomValue& root) {
 
     // A GeoJSON polygon is an array of rings, which is an array of
     // points, which is a 2-element array of coordinates.
@@ -118,7 +118,7 @@ static Polygon geoJsonToPolygon(const char* geoJsonStr, const PlannerDomValue& r
 //     }
 // }
 
-static MultiPolygon geoJsonToMultiPolygon(const char* geoJsonStr, const PlannerDomValue& root) {
+static MultiPolygon geoJsonToMultiPolygon(const PlannerDomValue& root) {
     MultiPolygon multiPoly;
 
     PlannerDomValue polys = root.valueForKey("coordinates");
@@ -160,9 +160,9 @@ static MultiPolygon geoJsonToMultiPolygon(const char* geoJsonStr, const PlannerD
     return multiPoly;
 }
 
-static std::string geometryType(const std::string& geoJsonStr, const PlannerDomValue &domVal) {
+static std::string geometryType(const PlannerDomValue &domVal) {
     if (! domVal.hasKey("type"))
-        throwGeoJsonFormattingError(geoJsonStr, "did not find key \"type\"");
+        throwGeoJsonFormattingError("did not find key \"type\"");
     return domVal.valueForKey("type").asStr();
 }
 
@@ -187,8 +187,8 @@ template<> NValue NValue::call<FUNC_VOLT_GEO_WITHIN>(const std::vector<NValue>& 
     const char* jsonStrPoint = reinterpret_cast<char*>(nvalPoint.getObjectValue_withoutNull());
     PlannerDomRoot pdrPoint(jsonStrPoint);
     PlannerDomValue pdvPoint = pdrPoint.rootObject();
-    assert (boost::iequals(geometryType(jsonStrPoint, pdvPoint), "Point"));
-    Point pt = geoJsonToPoint(jsonStrPoint, pdvPoint);
+    assert (boost::iequals(geometryType(pdvPoint), "Point"));
+    Point pt = geoJsonToPoint(pdvPoint);
 
     const char* jsonStrPoly = reinterpret_cast<char*>(nvalPoly.getObjectValue_withoutNull());
     PlannerDomRoot pdrPoly(jsonStrPoly);
@@ -197,13 +197,13 @@ template<> NValue NValue::call<FUNC_VOLT_GEO_WITHIN>(const std::vector<NValue>& 
     bool b;
 
     // It could be a polygon or multi-polygon
-    if (boost::iequals(geometryType(jsonStrPoly, pdvPoly), "Polygon")) {
-        Polygon poly = geoJsonToPolygon(jsonStrPoly, pdvPoly);
+    if (boost::iequals(geometryType(pdvPoly), "Polygon")) {
+        Polygon poly = geoJsonToPolygon(pdvPoly);
         b = bg::within(pt, poly);
     }
     else {
-        assert(boost::iequals(geometryType(jsonStrPoly, pdvPoly), "MultiPolygon"));
-        MultiPolygon multiPoly = geoJsonToMultiPolygon(jsonStrPoly, pdvPoly);
+        assert(boost::iequals(geometryType(pdvPoly), "MultiPolygon"));
+        MultiPolygon multiPoly = geoJsonToMultiPolygon(pdvPoly);
         b = bg::within(pt, multiPoly);
     }
 
@@ -234,13 +234,13 @@ template<> NValue NValue::call<FUNC_VOLT_GEO_WITHIN>(const std::vector<NValue>& 
         double area;
 
         // It could be a polygon or multi-polygon
-        if (boost::iequals(geometryType(jsonStrPoly, pdvPoly), "Polygon")) {
-            Polygon poly = geoJsonToPolygon(jsonStrPoly, pdvPoly);
+        if (boost::iequals(geometryType(pdvPoly), "Polygon")) {
+            Polygon poly = geoJsonToPolygon(pdvPoly);
             area = bg::area(poly);
         }
         else {
-            assert(boost::iequals(geometryType(jsonStrPoly, pdvPoly), "MultiPolygon"));
-            MultiPolygon multiPoly = geoJsonToMultiPolygon(jsonStrPoly, pdvPoly);
+            assert(boost::iequals(geometryType(pdvPoly), "MultiPolygon"));
+            MultiPolygon multiPoly = geoJsonToMultiPolygon(pdvPoly);
             area = bg::area(multiPoly);
         }
 
@@ -250,8 +250,36 @@ template<> NValue NValue::call<FUNC_VOLT_GEO_WITHIN>(const std::vector<NValue>& 
         return result;
     }
 
+template<> NValue NValue::call<FUNC_VOLT_GEO_DISTANCE>(const std::vector<NValue>& arguments) {
+
+    assert(arguments.size() == 2);
+    Point pts[2];
+
+    for (int i = 0; i < 2; ++i) {
+        const NValue& nval = arguments[i];
+
+        if (nval.getValueType() != VALUE_TYPE_VARCHAR) {
+            throwCastSQLException(nval.getValueType(), VALUE_TYPE_VARCHAR);
+        }
+
+        if (nval.isNull()) {
+            return NValue::getNullValue(VALUE_TYPE_DOUBLE);
+        }
+
+        const char* json = reinterpret_cast<char*>(nval.getObjectValue_withoutNull());
+        PlannerDomRoot pdr(json);
+        PlannerDomValue pdv = pdr.rootObject();
+        assert (boost::iequals(geometryType(pdv), "Point"));
+        pts[i] = geoJsonToPoint(pdv);
+    }
+
+    double dist = bg::distance(pts[0], pts[1]);
+    NValue result(VALUE_TYPE_DOUBLE);
+    result.getDouble() = dist;
+    return result;
+}
+
     // Interesting geo functions:
-    //   area
     //   centroid
     //   distance
     //   num_geometries

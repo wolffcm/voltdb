@@ -40,6 +40,30 @@ import org.voltdb_testprocs.regressionsuites.fixedsql.Insert;
 
 public class TestGeoFunctions extends RegressionSuite {
 
+    public void testGeoDistance() throws Exception {
+        Client client = getClient();
+        client.callProcedure("points.Insert", 0, "New York City",
+                "{"
+                + "\"type\": \"Point\","
+                + "\"coordinates\": [-74.07, 40.72]"
+                + "}");
+
+        // Denver: a random city that is clearly within the
+        // borders of Colorado
+        client.callProcedure("points.Insert", 1, "Los Angeles",
+                "{"
+                + "\"type\": \"Point\","
+                + "\"coordinates\": [-118.25, 34.05]"
+                + "}");
+
+        VoltTable vt = client.callProcedure("@AdHoc",
+                "select pts1.name as name1, pts2.name as name2, "
+                + "   geo_distance(pts1.geo_json, pts2.geo_json) * 3959"
+                + "from points as pts1, points pts2")
+                .getResults()[0];
+        System.out.println(vt);
+    }
+
     public void testGeoArea() throws Exception {
         Client client = getClient();
         client.callProcedure("regions.Insert", 0, "Square",

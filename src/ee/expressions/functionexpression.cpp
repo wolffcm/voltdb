@@ -395,6 +395,9 @@ ExpressionUtil::functionFactory(int functionId, const std::vector<AbstractExpres
         case FUNC_VOLT_GEO_WITHIN:
             ret = new GeneralFunctionExpression<FUNC_VOLT_GEO_WITHIN>(*arguments);
             break;
+        case FUNC_VOLT_GEO_DISTANCE:
+            ret = new GeneralFunctionExpression<FUNC_VOLT_GEO_DISTANCE>(*arguments);
+            break;
         default:
             return NULL;
         }
