@@ -375,7 +375,7 @@ public class Inits {
             // This is where we compile real catalog and create runtime
             // catalog context. To validate deployment we compile and create
             // a starter context which uses a placeholder catalog.
-            String result = CatalogUtil.compileDeployment(catalog, m_deployment, false);
+            String result = CatalogUtil.compileDeployment(catalog, m_deployment);
             if (result != null) {
                 hostLog.fatal(result);
                 VoltDB.crashLocalVoltDB(result);

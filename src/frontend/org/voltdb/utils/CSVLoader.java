@@ -109,6 +109,7 @@ public class CSVLoader implements BulkLoaderErrorHandler {
      * Used for testing only.
      */
     public static boolean testMode = false;
+    public static boolean testSucceeded = true;
 
     private class ErrorInfoItem {
         public long lineNumber;
@@ -207,6 +208,10 @@ public class CSVLoader implements BulkLoaderErrorHandler {
                 if (status != ClientResponse.USER_ABORT && status != ClientResponse.GRACEFUL_FAILURE) {
                     System.out.println("Fatal Response from server for: " + response.getStatusString()
                             + " for: " + rawLine);
+                    // A System.exit call is not very graceful in junit test mode,
+                    // but it's not clear that returning true will be effective in
+                    // terminating the run in ALL cases.
+                    // The return value of handleError is not universally checked.
                     System.exit(1);
                 }
             }
@@ -377,7 +382,20 @@ public class CSVLoader implements BulkLoaderErrorHandler {
         cfg.parse(CSVLoader.class.getName(), args);
         config = cfg;
 
-        configuration();
+        if (testMode) {
+            testSucceeded = true;
+        }
+
+        Exception misconfig = configuration();
+        if (misconfig != null) {
+            m_log.error(misconfig.getMessage(), misconfig);
+            if (testMode) {
+                testSucceeded = false;
+                return; // don't crash the junit test.
+            }
+            System.exit(-1);
+        }
+
         final Tokenizer tokenizer;
         ICsvListReader listReader = null;
         try {
@@ -394,6 +412,10 @@ public class CSVLoader implements BulkLoaderErrorHandler {
             }
         } catch (FileNotFoundException e) {
             m_log.error("CSV file '" + config.file + "' could not be found.");
+            if (testMode) {
+                testSucceeded = false;
+                return; // don't crash the junit test.
+            }
             System.exit(-1);
         }
         // Split server list
@@ -408,6 +430,10 @@ public class CSVLoader implements BulkLoaderErrorHandler {
         } catch (Exception e) {
             m_log.error("Error connecting to the servers: "
                     + config.servers);
+            if (testMode) {
+                testSucceeded = false;
+                return; // don't crash the junit test.
+            }
             System.exit(-1);
         }
         assert (csvClient != null);
@@ -471,17 +497,22 @@ public class CSVLoader implements BulkLoaderErrorHandler {
                        + ackCount + " rows (final)");
             errHandler.produceFiles(ackCount, insertCount);
             close_cleanup();
-            //In test junit mode we let it continue for reuse
-            if (!CSVLoader.testMode) {
-                System.exit(errHandler.m_errorInfo.isEmpty() ? 0 : -1);
+            if (testMode) {
+                testSucceeded = errHandler.m_errorInfo.isEmpty();
+                return; // don't crash the junit test.
             }
+            System.exit(errHandler.m_errorInfo.isEmpty() ? 0 : -1);
         } catch (Exception ex) {
             m_log.error("Exception Happened while loading CSV data: " + ex);
+            if (testMode) {
+                testSucceeded = false;
+                return; // don't crash the junit test.
+            }
             System.exit(1);
         }
     }
 
-    private static void configuration() {
+    private static Exception configuration() {
         csvPreference = new CsvPreference.Builder(config.quotechar, config.separator, "\n").build();
         if (config.file.equals("")) {
             standin = true;
@@ -501,8 +532,7 @@ public class CSVLoader implements BulkLoaderErrorHandler {
                 dir.mkdirs();
             }
         } catch (Exception x) {
-            m_log.error(x.getMessage(), x);
-            System.exit(-1);
+            return x;
         }
 
         insertProcedure = insertProcedure.replaceAll("\\.", "_");
@@ -519,9 +549,9 @@ public class CSVLoader implements BulkLoaderErrorHandler {
             out_logfile = new BufferedWriter(new FileWriter(pathLogfile));
             out_reportfile = new BufferedWriter(new FileWriter(pathReportfile));
         } catch (IOException e) {
-            m_log.error(e.getMessage());
-            System.exit(-1);
+            return e;
         }
+        return null;
     }
 
     /**

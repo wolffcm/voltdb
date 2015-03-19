@@ -388,21 +388,19 @@ public class TestVoltCompiler extends TestCase {
             System.exit(-1);
         }
 
-        VoltProjectBuilder builder = new VoltProjectBuilder();
-
-        builder.addProcedures(org.voltdb.compiler.procedures.TPCCTestProc.class);
-        builder.setSnapshotSettings("32m", 5, "/tmp", "woobar");
-        builder.addSchema(schemaPath);
+        CatalogBuilder cb = new CatalogBuilder()
+        .addSchema(schemaPath)
+        ;
+        DeploymentBuilder db = new DeploymentBuilder()
+        .setSnapshotSettings("32m", 5, "/tmp", "woobar");
         try {
-            assertTrue(builder.compile("/tmp/snapshot_settings_test.jar"));
-            final String catalogContents =
-                VoltCompilerUtils.readFileFromJarfile("/tmp/snapshot_settings_test.jar", "catalog.txt");
-            final Catalog cat = new Catalog();
-            cat.execute(catalogContents);
-            CatalogUtil.compileDeployment(cat, builder.getPathToDeployment(), false);
-            SnapshotSchedule schedule =
-                cat.getClusters().get("cluster").getDatabases().
-                    get("database").getSnapshotschedule().get("default");
+            File jar = cb.compileToTempJar();
+            assertNotNull("Schema compile failed", jar);
+            final Catalog cat =
+                    VoltCompilerUtils.deserializeCatalogFromCatalogJarfile(jar.getAbsolutePath());
+            String deploymentFile = db.writeXMLToTempFile();
+            CatalogUtil.compileDeploymentForTest(cat, deploymentFile);
+            SnapshotSchedule schedule = CatalogUtil.getDatabase(cat).getSnapshotschedule().get("default");
             assertEquals(32, schedule.getFrequencyvalue());
             assertEquals("m", schedule.getFrequencyunit());
             //Will be empty because the deployment file initialization is what sets this value
@@ -443,30 +441,33 @@ public class TestVoltCompiler extends TestCase {
 
     // test that Export configuration is insensitive to the case of the table name
     public void testExportTableCase() throws IOException {
-        if (!MiscUtils.isPro()) { return; } // not supported in community
+        if (!MiscUtils.isPro()) {
+            return; // not supported in community
+        }
 
-        final VoltProjectBuilder project = new VoltProjectBuilder();
-        project.addSchema(TestVoltCompiler.class.getResource("ExportTester-ddl.sql"));
-        project.addStmtProcedure("Dummy", "insert into a values (?, ?, ?);",
-                                "a.a_id: 0");
-        project.addPartitionInfo("A", "A_ID");
-        project.addPartitionInfo("B", "B_ID");
-        project.addPartitionInfo("e", "e_id");
-        project.addPartitionInfo("f", "f_id");
-        project.addExport(true /* enabled */);
-        project.setTableAsExportOnly("A"); // uppercase DDL, uppercase export
-        project.setTableAsExportOnly("b"); // uppercase DDL, lowercase export
-        project.setTableAsExportOnly("E"); // lowercase DDL, uppercase export
-        project.setTableAsExportOnly("f"); // lowercase DDL, lowercase export
+        CatalogBuilder cb = new CatalogBuilder()
+        .addSchema(TestVoltCompiler.class.getResource("ExportTester-ddl.sql"))
+        .addStmtProcedure("Dummy", "insert into a values (?, ?, ?);", "a.a_id", 0)
+        .addPartitionInfo("A", "A_ID")
+        .addPartitionInfo("B", "B_ID")
+        .addPartitionInfo("e", "e_id")
+        .addPartitionInfo("f", "f_id")
+        .setTableAsExportOnly("A") // uppercase DDL, uppercase export
+        .setTableAsExportOnly("b") // uppercase DDL, lowercase export
+        .setTableAsExportOnly("E") // lowercase DDL, uppercase export
+        .setTableAsExportOnly("f"); // lowercase DDL, lowercase export
+        DeploymentBuilder db = new DeploymentBuilder()
+        .addExport(true /* enabled */, null, null);
+        String pathToDeployment = db.writeXMLToTempFile();
+        File jarFile = null;
         try {
-            assertTrue(project.compile("/tmp/exportsettingstest.jar"));
-            final String catalogContents =
-                VoltCompilerUtils.readFileFromJarfile("/tmp/exportsettingstest.jar", "catalog.txt");
-            final Catalog cat = new Catalog();
-            cat.execute(catalogContents);
-            CatalogUtil.compileDeployment(cat, project.getPathToDeployment(), false);
-            Connector connector = cat.getClusters().get("cluster").getDatabases().
-                get("database").getConnectors().get(Constants.DEFAULT_EXPORT_CONNECTOR_NAME);
+            jarFile = cb.compileToTempJar();
+            assertNotNull("Catalog failed to compile", jarFile);
+            final Catalog cat =
+                    VoltCompilerUtils.deserializeCatalogFromCatalogJarfile(jarFile.getAbsolutePath());
+            CatalogUtil.compileDeploymentForTest(cat, pathToDeployment);
+            Connector connector = CatalogUtil.getDatabase(cat)
+                    .getConnectors().get(Constants.DEFAULT_EXPORT_CONNECTOR_NAME);
             assertTrue(connector.getEnabled());
             // Assert that all tables exist in the connector section of catalog
             assertNotNull(connector.getTableinfo().getIgnoreCase("a"));
@@ -474,8 +475,9 @@ public class TestVoltCompiler extends TestCase {
             assertNotNull(connector.getTableinfo().getIgnoreCase("e"));
             assertNotNull(connector.getTableinfo().getIgnoreCase("f"));
         } finally {
-            final File jar = new File("/tmp/exportsettingstest.jar");
-            jar.delete();
+            if (jarFile != null) {
+                jarFile.delete();
+            }
         }
     }
 
@@ -655,11 +657,11 @@ public class TestVoltCompiler extends TestCase {
 
     public void testBadClusterConfig() throws IOException {
         // check no hosts
-        ClusterConfig cluster_config = new ClusterConfig(0, 1, 0);
+        ClusterConfig cluster_config = new ClusterConfig(1, 0, 0);
         assertFalse(cluster_config.validate());
 
         // check no sites-per-hosts
-        cluster_config = new ClusterConfig(1, 0, 0);
+        cluster_config = new ClusterConfig(0, 1, 0);
         assertFalse(cluster_config.validate());
     }
 

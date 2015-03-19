@@ -106,10 +106,10 @@ public class ClusterConfig
         }
     }
 
-    public ClusterConfig(int hostCount, int sitesPerHost, int replicationFactor)
+    public ClusterConfig(int sitesPerHost, int hostCount, int replicationFactor)
     {
-        m_hostCount = hostCount;
         m_sitesPerHost = sitesPerHost;
+        m_hostCount = hostCount;
         m_replicationFactor = replicationFactor;
         m_errorMsg = "Config is unvalidated";
     }
@@ -119,8 +119,8 @@ public class ClusterConfig
     // this all magically works.  If you change that fact, good luck Chuck.
     public ClusterConfig(JSONObject topo) throws JSONException
     {
-        m_hostCount = topo.getInt("hostcount");
         m_sitesPerHost = topo.getInt("sites_per_host");
+        m_hostCount = topo.getInt("hostcount");
         m_replicationFactor = topo.getInt("kfactor");
         m_errorMsg = "Config is unvalidated";
     }
@@ -491,9 +491,9 @@ public class ClusterConfig
 
         JSONStringer stringer = new JSONStringer();
         stringer.object();
+        stringer.key("sites_per_host").value(sitesPerHost);
         stringer.key("hostcount").value(m_hostCount);
         stringer.key("kfactor").value(getReplicationFactor());
-        stringer.key("sites_per_host").value(sitesPerHost);
         stringer.key("partitions").array();
         for (int part = 0; part < partitionCount; part++)
         {
@@ -519,9 +519,9 @@ public class ClusterConfig
     // rejoin clones this from an existing server.
     public JSONObject getTopology(List<Integer> hostIds) throws JSONException
     {
+        int sitesPerHost = getSitesPerHost();
         int hostCount = getHostCount();
         int partitionCount = getPartitionCount();
-        int sitesPerHost = getSitesPerHost();
 
         if (hostCount != hostIds.size()) {
             throw new RuntimeException("Provided " + hostIds.size() + " host ids when host count is " + hostCount);

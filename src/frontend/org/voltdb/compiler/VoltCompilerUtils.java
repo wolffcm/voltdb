@@ -27,6 +27,7 @@ import java.net.URL;
 import java.util.jar.JarEntry;
 import java.util.jar.JarInputStream;
 
+import org.voltdb.catalog.Catalog;
 import org.voltdb.utils.InMemoryJarfile;
 import org.voltdb.utils.InMemoryJarfile.JarLoader;
 
@@ -69,6 +70,13 @@ public class VoltCompilerUtils
         byte[] bytes = InMemoryJarfile.readFromJarEntry(jarIn, catEntry);
 
         return new String(bytes, "UTF-8");
+    }
+
+    static Catalog deserializeCatalogFromCatalogJarfile(String jarfilePath) throws IOException {
+        String catalogContents = readFileFromJarfile(jarfilePath, "catalog.txt");
+        Catalog result = new Catalog();
+        result.execute(catalogContents);
+        return result;
     }
 
     public static boolean addClassToJar(InMemoryJarfile jarOutput, final Class<?> cls)

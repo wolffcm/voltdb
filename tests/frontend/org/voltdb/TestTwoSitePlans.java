@@ -39,6 +39,8 @@ import org.voltdb.catalog.Cluster;
 import org.voltdb.catalog.PlanFragment;
 import org.voltdb.catalog.Procedure;
 import org.voltdb.catalog.Statement;
+import org.voltdb.compiler.DeploymentBuilder;
+import org.voltdb.compiler.deploymentfile.DeploymentType;
 import org.voltdb.dtxn.DtxnConstants;
 import org.voltdb.jni.ExecutionEngine;
 import org.voltdb.jni.ExecutionEngineJNI;
@@ -89,9 +91,10 @@ public class TestTwoSitePlans extends TestCase {
         catalog = new Catalog();
         catalog.execute(serializedCatalog);
 
-        // update the catalog with the data from the deployment file
-        String pathToDeployment = pb.getPathToDeployment();
-        assertTrue(CatalogUtil.compileDeployment(catalog, pathToDeployment, false) == null);
+        // update the catalog with the data from the deployment file (WHY?)
+        String deploymentStr = new DeploymentBuilder(2).getXML();
+        DeploymentType deployment = CatalogUtil.parseDeploymentFromString(deploymentStr);
+        assertTrue(CatalogUtil.compileDeployment(catalog, deployment) == null);
 
         cluster = catalog.getClusters().get("cluster");
         CatalogMap<Procedure> procedures = cluster.getDatabases().get("database").getProcedures();

@@ -44,6 +44,7 @@ import org.voltdb.benchmark.tpcc.procedures.paymentByCustomerNameC;
 import org.voltdb.benchmark.tpcc.procedures.paymentByCustomerNameW;
 import org.voltdb.benchmark.tpcc.procedures.slev;
 import org.voltdb.catalog.Catalog;
+import org.voltdb.compiler.CatalogBuilder;
 import org.voltdb.compiler.VoltProjectBuilder;
 import org.voltdb.utils.BuildDirectoryUtils;
 
@@ -107,6 +108,41 @@ public class TPCCProjectBuilder extends VoltProjectBuilder {
         for (String pair[] : partitioning) {
             addPartitionInfo(pair[0], pair[1]);
         }
+    }
+
+    /**
+     * Add the TPC-C partitioning to the CatalogBuilder.
+     */
+    public static CatalogBuilder addDefaultPartitioning(CatalogBuilder cb) {
+        for (String pair[] : partitioning) {
+            cb.addPartitionInfo(pair[0], pair[1]);
+        }
+        return cb;
+    }
+
+   // factory method
+    public static CatalogBuilder defaultCatalogBuilder() {
+        return addDefaultPartitioning(new CatalogBuilder())
+        .addSchema(ddlURL)
+        .addProcedures(PROCEDURES)
+        .addStmtProcedure("InsertCustomer", "INSERT INTO CUSTOMER VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);", "CUSTOMER.C_W_ID", 2)
+        .addStmtProcedure("InsertWarehouse", "INSERT INTO WAREHOUSE VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);", "WAREHOUSE.W_ID", 0)
+        .addStmtProcedure("InsertStock", "INSERT INTO STOCK VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);", "STOCK.S_W_ID", 1)
+        .addStmtProcedure("InsertOrders", "INSERT INTO ORDERS VALUES (?, ?, ?, ?, ?, ?, ?, ?);", "ORDERS.O_W_ID", 2)
+        .addStmtProcedure("InsertOrderLine", "INSERT INTO ORDER_LINE VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);", "ORDER_LINE.OL_W_ID", 2)
+        .addStmtProcedure("InsertNewOrder", "INSERT INTO NEW_ORDER VALUES (?, ?, ?);", "NEW_ORDER.NO_W_ID", 2)
+        .addStmtProcedure("InsertItem", "INSERT INTO ITEM VALUES (?, ?, ?, ?, ?);")
+        .addStmtProcedure("InsertHistory", "INSERT INTO HISTORY VALUES (?, ?, ?, ?, ?, ?, ?, ?);", "HISTORY.H_W_ID", 4)
+        .addStmtProcedure("InsertDistrict", "INSERT INTO DISTRICT VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);", "DISTRICT.D_W_ID", 1)
+        .addStmtProcedure("InsertCustomerName", "INSERT INTO CUSTOMER_NAME VALUES (?, ?, ?, ?, ?);")
+        ;
+        // addDefaultExport();
+    }
+
+    // factory method
+    public static CatalogBuilder catalogBuilderNoProcs() {
+        return addDefaultPartitioning(new CatalogBuilder()).addSchema(ddlURL);
+        // addDefaultExport();
     }
 
     /**

@@ -31,9 +31,8 @@ import org.voltdb.client.Client;
 import org.voltdb.client.ClientConfig;
 import org.voltdb.client.ClientFactory;
 import org.voltdb.client.ProcCallException;
-import org.voltdb.compiler.Deploymentinator;
-import org.voltdb.compiler.Deploymentinator.UserInfo;
-import org.voltdb.compiler.VoltProjectBuilder;
+import org.voltdb.compiler.DeploymentBuilder;
+import org.voltdb.compiler.DeploymentBuilder.UserInfo;
 
 public class TestAdhocCreateDropRole extends AdhocDDLTestBase {
 
@@ -44,39 +43,28 @@ public class TestAdhocCreateDropRole extends AdhocDDLTestBase {
     public void testBasic() throws Exception
     {
         System.out.println("\n\n-----\n testBasic \n-----\n\n");
-
-        String pathToCatalog = Configuration.getPathToCatalogForTest("adhocddl.jar");
-        String pathToDeployment = Configuration.getPathToCatalogForTest("adhocddl.xml");
-        VoltProjectBuilder builder = new VoltProjectBuilder();
-        // Need to parallel dbuilder as we modify builder
-        Deploymentinator dbuilder = new Deploymentinator(2, 1, 0);
-        builder.addLiteralSchema(
+        String literalSchema =
                 "create table FOO (" +
                 "ID integer not null," +
                 "VAL bigint, " +
                 "constraint PK_TREE primary key (ID)" +
                 ");\n" +
+                "partition table FOO on column ID;\n" +
+
                 "create table FOO_R (" +
                 "ID integer not null," +
                 "VAL bigint, " +
                 "constraint PK_TREE_R primary key (ID)" +
-                ");\n"
-                );
-        builder.addPartitionInfo("FOO", "ID");
-        dbuilder.setUseDDLSchema(true);
+                ");\n" +
+                "";
+        DeploymentBuilder db = new DeploymentBuilder(2)
+        .setUseAdHocDDL(true)
+        .setSecurityEnabled(true, false)
         // Use random caps in role names to check case-insensitivity
-        dbuilder.addUsers(new Deploymentinator.UserInfo[]
-                {new Deploymentinator.UserInfo("admin", "admin", new String[] {"Administrator"})});
-        dbuilder.setSecurityEnabled(true);
-        dbuilder.setEnableCommandLogging(false);
-        boolean success = builder.compile(pathToCatalog, 2, 1, 0);
-        assertTrue("Schema compilation failed", success);
-        dbuilder.writeXML(pathToDeployment);
-        //MiscUtils.copyFile(builder.getPathToDeployment(), pathToDeployment);
-
-        VoltDB.Configuration config = new VoltDB.Configuration();
-        config.m_pathToCatalog = pathToCatalog;
-        config.m_pathToDeployment = pathToDeployment;
+        .addUsers(new DeploymentBuilder.UserInfo("admin", "admin", "Administrator"))
+        ;
+        Configuration config = Configuration.compile(getClass().getSimpleName(), literalSchema, db);
+        assertNotNull("Configuration failed to compile", config);
 
         try {
             startServer(config);
@@ -87,20 +75,16 @@ public class TestAdhocCreateDropRole extends AdhocDDLTestBase {
 
             adminClient.createConnection("localhost");
             // Can't connect a user which doesn't exist
-            boolean threw = false;
             try {
                 userClient.createConnection("localhost");
+                fail("Connecting bad user should have failed");
             }
             catch (IOException ioe) {
-                threw = true;
                 assertTrue(ioe.getMessage().contains("Authentication rejected"));
             }
-            assertTrue("Connecting bad user should have failed", threw);
 
-            // Add the user with the new role
-            dbuilder.addUsers(new UserInfo[]
-                    {new UserInfo("user", "user", new String[] {"NEWROLE"})});
-            dbuilder.writeXML(pathToDeployment);
+            db.addUsers(new UserInfo("user", "user", "NEWROLE"));
+            String pathToDeployment = db.writeXMLToTempFile();
             try {
                 adminClient.updateApplicationCatalog(null, new File(pathToDeployment));
             }
@@ -119,15 +103,13 @@ public class TestAdhocCreateDropRole extends AdhocDDLTestBase {
             }
 
             // Make sure the user doesn't actually have DEFAULTPROC permissions yet
-            threw = false;
             try {
                 userClient.callProcedure("FOO.insert", 0, 0);
+                fail("'user' shouldn't be able to call procedures yet");
             }
             catch (ProcCallException pce) {
-                pce.printStackTrace();
-                threw = true;
+                //*enable to debug */ pce.printStackTrace();
             }
-            assertTrue("'user' shouldn't be able to call procedures yet", threw);
 
             // Okay, it's showtime.  Let's add the role through live DDL
             try {
@@ -155,36 +137,31 @@ public class TestAdhocCreateDropRole extends AdhocDDLTestBase {
                 fail("'user' should be able to call default procs now");
             }
 
-            threw = false;
             try {
                 adminClient.callProcedure("@AdHoc", "create role NEWROLE with ALLPROC");
+                fail("Shouldn't be able to 'create' same role twice");
             }
             catch (ProcCallException pce) {
+                //*enable to debug */ pce.printStackTrace();
                 assertTrue(pce.getMessage().contains("already exists"));
-                threw = true;
             }
-            assertTrue("Shouldn't be able to 'create' same role twice", threw);
 
-            threw = false;
             try {
                 // Use random caps in role names to check case-insensitivity
                 adminClient.callProcedure("@AdHoc", "create role aDministrator with ALLPROC");
+                fail("Shouldn't be able to 'create' ADMINISTRATOR role");
             }
             catch (ProcCallException pce) {
                 assertTrue(pce.getMessage().contains("already exists"));
-                threw = true;
             }
-            assertTrue("Shouldn't be able to 'create' ADMINISTRATOR role", threw);
 
-            threw = false;
             try {
                 adminClient.callProcedure("@AdHoc", "create role USER with ALLPROC");
+                fail("Shouldn't be able to 'create' USER role");
             }
             catch (ProcCallException pce) {
                 assertTrue(pce.getMessage().contains("already exists"));
-                threw = true;
             }
-            assertTrue("Shouldn't be able to 'create' USER role", threw);
 
             try {
                 adminClient.callProcedure("@AdHoc", "drop role NEWROLE;");
@@ -197,12 +174,11 @@ public class TestAdhocCreateDropRole extends AdhocDDLTestBase {
             // Can't drop twice
             try {
                 adminClient.callProcedure("@AdHoc", "drop role NEWROLE;");
+                fail("Can't vanilla DROP a role which doesn't exist");
             }
             catch (ProcCallException pce) {
-                pce.printStackTrace();
-                threw = true;
+                //*enable to debug */ pce.printStackTrace();
             }
-            assertTrue("Can't vanilla DROP a role which doesn't exist", threw);
 
             // unless you use IF EXISTS
             try {
@@ -214,54 +190,46 @@ public class TestAdhocCreateDropRole extends AdhocDDLTestBase {
             }
 
             // Make sure the user doesn't actually have DEFAULTPROC permissions any more
-            threw = false;
             try {
                 userClient.callProcedure("FOO.insert", 0, 0);
+                fail("'user' shouldn't be able to call procedures yet");
             }
             catch (ProcCallException pce) {
-                pce.printStackTrace();
-                threw = true;
+                //*enable to debug */ pce.printStackTrace();
             }
-            assertTrue("'user' shouldn't be able to call procedures yet", threw);
 
-            threw = false;
             try {
                 adminClient.callProcedure("@AdHoc", "drop role USER;");
+                fail("Shouldn't be able to drop role USER");
             }
             catch (ProcCallException pce) {
-                threw = true;
+                //*enable to debug */ pce.printStackTrace();
                 assertTrue(pce.getMessage().contains("You may not drop the built-in role"));
-                pce.printStackTrace();
             }
-            assertTrue("Shouldn't be able to drop role USER", threw);
 
             // CHeck the administrator error message, there should end up being multiple
             // reasons why we can't get rid of this role (like, we will require you to always
             // have a user with this role)
-            threw = false;
             try {
                 // Use random caps in role names to check case-insensitivity
                 adminClient.callProcedure("@AdHoc", "drop role adMinistrator;");
+                fail("Shouldn't be able to drop role ADMINISTRATOR");
             }
             catch (ProcCallException pce) {
-                threw = true;
+                //*enable to debug */ pce.printStackTrace();
                 assertTrue(pce.getMessage().contains("You may not drop the built-in role"));
-                pce.printStackTrace();
             }
-            assertTrue("Shouldn't be able to drop role ADMINISTRATOR", threw);
 
             // Make sure that we can't get rid of the administrator user
-            dbuilder.removeUser("admin");
-            dbuilder.writeXML(pathToDeployment);
-            threw = false;
+            db.removeUser("admin");
+            pathToDeployment = db.writeXMLToTempFile();
             try {
                 adminClient.updateApplicationCatalog(null, new File(pathToDeployment));
+                fail("Shouldn't be able to remove the last remaining ADMINSTRATOR user");
             }
             catch (ProcCallException pce) {
-                pce.printStackTrace();
-                threw = true;
+                //*enable to debug */ pce.printStackTrace();
             }
-            assertTrue("Shouldn't be able to remove the last remaining ADMINSTRATOR user", threw);
         }
         finally {
             teardownSystem();

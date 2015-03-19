@@ -26,18 +26,18 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 
+import junit.framework.TestCase;
+
 import org.json_voltpatches.JSONArray;
 import org.json_voltpatches.JSONException;
 import org.json_voltpatches.JSONObject;
-
-import junit.framework.TestCase;
 import org.voltdb.VoltDB;
 
 public class TestClusterCompiler extends TestCase
 {
     public void testNonZeroReplicationFactor() throws Exception
     {
-        ClusterConfig config = new ClusterConfig(3, 1, 2);
+        ClusterConfig config = new ClusterConfig(1, 3, 2);
         List<Integer> topology = Arrays.asList(new Integer[] { 0, 1, 2 });
         JSONObject obj = config.getTopology(topology);
         config.validate();
@@ -67,9 +67,9 @@ public class TestClusterCompiler extends TestCase
 
     public void testSufficientHostsToReplicate()
     {
-        // 2 hosts, 6 sites per host, 2 copies of each partition.
+        // 6 sites per host, 2 hosts, 2 copies of each partition.
         // there are sufficient execution sites, but insufficient hosts
-        ClusterConfig config = new ClusterConfig(2, 6, 2);
+        ClusterConfig config = new ClusterConfig(6, 2, 2);
         try
         {
             if (!config.validate()) {
@@ -88,7 +88,7 @@ public class TestClusterCompiler extends TestCase
 
     public void testAddHostToNonKsafe() throws JSONException
     {
-        ClusterConfig config = new ClusterConfig(1, 6, 0);
+        ClusterConfig config = new ClusterConfig(6, 1, 0);
         JSONObject topo = config.getTopology(Arrays.asList(0));
         assertEquals(1, topo.getInt("hostcount"));
         assertEquals(6, topo.getInt("sites_per_host"));
@@ -102,7 +102,7 @@ public class TestClusterCompiler extends TestCase
 
     public void testAddHostsToNonKsafe() throws JSONException
     {
-        ClusterConfig config = new ClusterConfig(2, 6, 0);
+        ClusterConfig config = new ClusterConfig(6, 2, 0);
         JSONObject topo = config.getTopology(Arrays.asList(0, 1));
         assertEquals(2, topo.getInt("hostcount"));
         assertEquals(6, topo.getInt("sites_per_host"));
@@ -118,7 +118,7 @@ public class TestClusterCompiler extends TestCase
 
     public void testAddHostsToKsafe() throws JSONException
     {
-        ClusterConfig config = new ClusterConfig(2, 6, 1);
+        ClusterConfig config = new ClusterConfig(6, 2, 1);
         JSONObject topo = config.getTopology(Arrays.asList(0, 1));
         assertEquals(2, topo.getInt("hostcount"));
         assertEquals(6, topo.getInt("sites_per_host"));
@@ -132,7 +132,7 @@ public class TestClusterCompiler extends TestCase
 
     public void testAddMoreThanKsafeHosts() throws JSONException
     {
-        ClusterConfig config = new ClusterConfig(2, 6, 1);
+        ClusterConfig config = new ClusterConfig(6, 2, 1);
         JSONObject topo = config.getTopology(Arrays.asList(0, 1));
         assertEquals(2, topo.getInt("hostcount"));
         assertEquals(6, topo.getInt("sites_per_host"));

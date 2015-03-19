@@ -23,15 +23,11 @@
 
 package org.voltdb.catalog;
 
-import java.io.File;
-import java.io.IOException;
-
 import junit.framework.TestCase;
 
 import org.voltdb.ClientResponseImpl;
 import org.voltdb.ServerThread;
 import org.voltdb.TableHelper;
-import org.voltdb.VoltDB;
 import org.voltdb.VoltDB.Configuration;
 import org.voltdb.VoltTable;
 import org.voltdb.client.Client;
@@ -39,39 +35,16 @@ import org.voltdb.client.ClientConfig;
 import org.voltdb.client.ClientFactory;
 import org.voltdb.client.ClientResponse;
 import org.voltdb.client.ProcCallException;
-import org.voltdb.compiler.Cataloginator;
-import org.voltdb.compiler.Deploymentinator;
-import org.voltdb.compiler.VoltProjectBuilder;
-import org.voltdb.utils.MiscUtils;
+import org.voltdb.compiler.CatalogBuilder;
+import org.voltdb.compiler.DeploymentBuilder;
 
 public class TestLiveTableSchemaMigration extends TestCase {
-
-    /**
-     * Assuming given table has schema metadata, make a catalog containing
-     * that table on disk.
-     */
-    String catalogPathForTable(VoltTable t, String jarname) throws IOException {
-        Cataloginator builder = new Cataloginator();
-        String ddl = TableHelper.ddlForTable(t);
-        builder.addLiteralSchema(ddl);
-        String retval = Configuration.getPathToCatalogForTest(jarname);
-        boolean success = builder.compile(retval);
-        // good spot below for a breakpoint if compiling fails
-        if (!success) {
-            fail();
-        }
-        return retval;
-    }
-
-    void migrateSchema(VoltTable t1, VoltTable t2) throws Exception {
-        migrateSchema(t1, t2, true);
-    }
 
     /**
      * Assuming given tables have schema metadata, fill them with random data
      * and compare a pure-java schema migration with an EE schema migration.
      */
-    void migrateSchema(VoltTable t1, VoltTable t2, boolean withData) throws Exception {
+    private void migrateSchema(VoltTable t1, VoltTable t2, boolean withData) throws Exception {
         ServerThread server = null;
         Client client = null;
         TableHelper helper = new TableHelper();
@@ -81,20 +54,14 @@ public class TestLiveTableSchemaMigration extends TestCase {
                 helper.randomFill(t1, 1000, 1024);
             }
 
-            String catPath1 = catalogPathForTable(t1, "t1.jar");
-            String catPath2 = catalogPathForTable(t2, "t2.jar");
-            byte[] catBytes2 = MiscUtils.fileToBytes(new File(catPath2));
+            CatalogBuilder cb = new CatalogBuilder(TableHelper.ddlForTable(t1));
 
-            Deploymentinator depBuilder = new Deploymentinator(1, 1, 0);
-            depBuilder.setVoltRoot("/tmp/foobar");
+            DeploymentBuilder db = new DeploymentBuilder()
+            .setVoltRoot("/tmp/foobar")
             // disable logging
-            depBuilder.configureLogging("/tmp/foobar", "/tmp/foobar", false, false, 1, 1, 3);
-            String deployment = depBuilder.getXML();
-            File deploymentFile = VoltProjectBuilder.writeStringToTempFile(deployment);
-
-            VoltDB.Configuration config = new VoltDB.Configuration();
-            config.m_pathToDeployment = deploymentFile.getAbsolutePath();
-            config.m_pathToCatalog = catPath1;
+            .configureLogging("/tmp/foobar", "/tmp/foobar", false, false, 1, 1, 3)
+            ;
+            Configuration config = Configuration.compile(getClass().getSimpleName(), cb, db);
             config.m_ipcPort = 10000;
             //config.m_backend = BackendTarget.NATIVE_EE_IPC;
             server = new ServerThread(config);
@@ -109,6 +76,9 @@ public class TestLiveTableSchemaMigration extends TestCase {
             client.createConnection("localhost");
 
             TableHelper.loadTable(client, t1);
+
+            CatalogBuilder cb2 = new CatalogBuilder(TableHelper.ddlForTable(t2));
+            byte[] catBytes2 = cb2.compileToBytes();
 
             ClientResponseImpl response = (ClientResponseImpl) client.callProcedure(
                     "@UpdateApplicationCatalog", catBytes2, null);
@@ -145,7 +115,7 @@ public class TestLiveTableSchemaMigration extends TestCase {
      * Assuming given tables have schema metadata, fill them with random data
      * and compare a pure-java schema migration with an EE schema migration.
      */
-    void migrateSchemaUsingAlter(VoltTable t1, VoltTable t2, boolean withData)
+    private void migrateSchemaUsingAlter(VoltTable t1, VoltTable t2, boolean withData)
             throws Exception
     {
         ServerThread server = null;
@@ -159,20 +129,19 @@ public class TestLiveTableSchemaMigration extends TestCase {
                 helper.randomFill(t1, 1000, 1024);
             }
 
-            String catPath1 = catalogPathForTable(t1, "t1.jar");
+            CatalogBuilder cb = new CatalogBuilder(TableHelper.ddlForTable(t1));
 
-            Deploymentinator depBuilder = new Deploymentinator(1, 1, 0);
-            depBuilder.setVoltRoot("/tmp/foobar");
-            depBuilder.setUseDDLSchema(true);
+            DeploymentBuilder db = new DeploymentBuilder()
+            .setUseAdHocDDL(true)
+            .setVoltRoot("/tmp/foobar")
             // disable logging
-            depBuilder.configureLogging("/tmp/foobar", "/tmp/foobar", false, false, 1, 1, 3);
-            String deployment = depBuilder.getXML();
-            File deploymentFile = VoltProjectBuilder.writeStringToTempFile(deployment);
-
-            VoltDB.Configuration config = new VoltDB.Configuration();
-            config.m_pathToDeployment = deploymentFile.getAbsolutePath();
-            config.m_pathToCatalog = catPath1;
+            .configureLogging("/tmp/foobar", "/tmp/foobar", false, false, 1, 1, 3)
+            ;
+            Configuration config = Configuration.compile(getClass().getSimpleName(), cb, db);
             config.m_ipcPort = 10000;
+
+            // disable logging
+
             //config.m_backend = BackendTarget.NATIVE_EE_IPC;
             server = new ServerThread(config);
             server.start();
@@ -222,11 +191,11 @@ public class TestLiveTableSchemaMigration extends TestCase {
     /**
      * Helper if you have quick schema, rather than tables.
      */
-    void migrateSchema(String schema1, String schema2) throws Exception {
+    private void migrateSchema(String schema1, String schema2) throws Exception {
         migrateSchema(schema1, schema2, true);
     }
 
-    void migrateSchemaWithDataExpectFail(String schema1, String schema2, String pattern) throws Exception {
+    private void migrateSchemaWithDataExpectFail(String schema1, String schema2, String pattern) throws Exception {
         try {
             migrateSchema(schema1, schema2);
             fail();
@@ -245,7 +214,7 @@ public class TestLiveTableSchemaMigration extends TestCase {
     /**
      * Try the old way (@UpdateApplicationCatalog) and try using ALTER TABLE
      */
-    void migrateSchema(String schema1, String schema2, boolean withData) throws Exception {
+    private void migrateSchema(String schema1, String schema2, boolean withData) throws Exception {
         VoltTable t1 = TableHelper.quickTable(schema1);
         VoltTable t2 = TableHelper.quickTable(schema2);
 
@@ -369,7 +338,7 @@ public class TestLiveTableSchemaMigration extends TestCase {
             TableHelper.RandomTable trt = helper.getTotallyRandomTable("foo");
             VoltTable t1 = trt.table;
             VoltTable t2 = helper.mutateTable(t1, true);
-            migrateSchema(t1, t2);
+            migrateSchema(t1, t2, true);
             System.out.printf("testRandomSchemas tested %d/%d\n", i+1, count);
         }
     }

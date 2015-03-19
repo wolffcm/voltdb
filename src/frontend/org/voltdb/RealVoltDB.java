@@ -1191,7 +1191,7 @@ public class RealVoltDB implements VoltDBInterface, RestoreAgent.Callback {
             int sitesperhost = m_catalogContext.getDeployment().getCluster().getSitesperhost();
             int hostcount = m_catalogContext.getDeployment().getCluster().getHostcount();
             int kfactor = m_catalogContext.getDeployment().getCluster().getKfactor();
-            ClusterConfig clusterConfig = new ClusterConfig(hostcount, sitesperhost, kfactor);
+            ClusterConfig clusterConfig = new ClusterConfig(sitesperhost, hostcount, kfactor);
             if (!clusterConfig.validate()) {
                 VoltDB.crashLocalVoltDB(clusterConfig.getErrorMsg(), false, null);
             }
@@ -1475,7 +1475,7 @@ public class RealVoltDB implements VoltDBInterface, RestoreAgent.Callback {
             @SuppressWarnings("unused")
             Database db = cluster.getDatabases().add("database");
 
-            String result = CatalogUtil.compileDeployment(catalog, deployment, true);
+            String result = CatalogUtil.compileDeploymentNoUsersOrExport(catalog, deployment);
             if (result != null) {
                 // Any other non-enterprise deployment errors will be caught and handled here
                 // (such as <= 0 host count)
