@@ -28,11 +28,7 @@ import java.io.IOException;
 import org.voltdb.BackendTarget;
 import org.voltdb.VoltTable;
 import org.voltdb.client.Client;
-import org.voltdb.client.ClientResponse;
-import org.voltdb.client.NoConnectionsException;
-import org.voltdb.client.ProcCallException;
 import org.voltdb.compiler.VoltProjectBuilder;
-import org.voltdb_testprocs.regressionsuites.fixedsql.Insert;
 
 /**
  * Tests for SQL functions in the geo-spatial domain.
@@ -66,7 +62,8 @@ public class TestGeoFunctions extends RegressionSuite {
         VoltTable vt = client.callProcedure("@AdHoc",
                 "select geo_num_polygons(regions.geo_json) as num_polys, "
                 + "  geo_num_interior_rings(regions.geo_json) as num_int_rings, "
-                + "  geo_num_points(regions.geo_json) as num_points "
+                + "  geo_num_points(regions.geo_json) as num_points,"
+                + "  geo_perimeter(regions.geo_json) as perimeter "
                 + "from regions")
                 .getResults()[0];
         System.out.println(vt);

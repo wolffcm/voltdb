@@ -311,13 +311,22 @@ namespace voltdb {
         return result;
     }
 
+    template<> NValue NValue::callUnary<FUNC_VOLT_GEO_PERIMETER>() const {
+        if (getValueType() != VALUE_TYPE_VARCHAR) {
+            throwCastSQLException(getValueType(), VALUE_TYPE_VARCHAR);
+        }
 
+        if (isNull())
+            return NValue::getNullValue(VALUE_TYPE_DOUBLE);
 
-    // Interesting geo functions:
-    //   centroid
-    //   num_geometries
-    //   num_interior_rings
-    //   num_points
-    //   perimeter
+        MultiPolygon multiPoly;
+        geoJsonToGeometry(*this, multiPoly);
+
+        double perim = bg::perimeter(multiPoly);
+        NValue result(VALUE_TYPE_BIGINT);
+        result.getDouble() = perim;
+
+        return result;
+    }
 
 } // end namespace voltdb

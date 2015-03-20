@@ -127,6 +127,7 @@ public class FunctionForVoltDB extends FunctionSQL {
         static final int FUNC_VOLT_GEO_NUM_POLYGONS       = 20029;
         static final int FUNC_VOLT_GEO_NUM_INTERIOR_RINGS = 20030;
         static final int FUNC_VOLT_GEO_NUM_POINTS         = 20031;
+        static final int FUNC_VOLT_GEO_PERIMETER          = 20032;
 
         static final int FUNC_CONCAT                      = 124;
 
@@ -165,7 +166,12 @@ public class FunctionForVoltDB extends FunctionSQL {
                                   Tokens.CLOSEBRACKET }),
 
             new FunctionId("geo_area", Type.SQL_DOUBLE, FUNC_VOLT_GEO_AREA, -1,
-                    new Type[] { Type.SQL_VARCHAR, Type.SQL_VARCHAR },
+                    new Type[] { Type.SQL_VARCHAR },
+                    new short[] { Tokens.OPENBRACKET, Tokens.QUESTION,
+                                  Tokens.CLOSEBRACKET }),
+
+            new FunctionId("geo_perimeter", Type.SQL_DOUBLE, FUNC_VOLT_GEO_PERIMETER, -1,
+                    new Type[] { Type.SQL_VARCHAR },
                     new short[] { Tokens.OPENBRACKET, Tokens.QUESTION,
                                   Tokens.CLOSEBRACKET }),
 

@@ -343,6 +343,9 @@ ExpressionUtil::functionFactory(int functionId, const std::vector<AbstractExpres
         case FUNC_VOLT_GEO_NUM_POINTS:
             ret = new UnaryFunctionExpression<FUNC_VOLT_GEO_NUM_POINTS>((*arguments)[0]);
             break;
+        case FUNC_VOLT_GEO_PERIMETER:
+            ret = new UnaryFunctionExpression<FUNC_VOLT_GEO_PERIMETER>((*arguments)[0]);
+            break;
         default:
             return NULL;
         }
