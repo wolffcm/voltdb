@@ -16,6 +16,12 @@ create table us_states (
        geo_json varchar(500000 bytes) not null
 );
 
+create table us_counties (
+       id integer not null,
+       name varchar(128) not null,
+       state_id integer not null,
+       geo_json varchar(500000 bytes) not null
+);
 
 -- radius of earth is 3959 miles
 
