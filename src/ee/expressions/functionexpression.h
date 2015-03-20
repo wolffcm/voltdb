@@ -243,6 +243,9 @@ static const int FUNC_VOLT_FORMAT_CURRENCY             = 20025;
 static const int FUNC_VOLT_GEO_WITHIN                  = 20026;
 static const int FUNC_VOLT_GEO_AREA                    = 20027;
 static const int FUNC_VOLT_GEO_DISTANCE                = 20028;
+static const int FUNC_VOLT_GEO_NUM_POLYGONS            = 20029;
+static const int FUNC_VOLT_GEO_NUM_INTERIOR_RINGS      = 20030;
+static const int FUNC_VOLT_GEO_NUM_POINTS              = 20031;
 }
 
 // All of these "...functions.h" files need to be included AFTER the above definitions

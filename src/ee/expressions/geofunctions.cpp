@@ -38,99 +38,68 @@
 
 namespace voltdb {
 
-namespace bg = boost::geometry;
+    namespace bg = boost::geometry;
 
-typedef bg::cs::spherical_equatorial<bg::degree> CoordSys;
+    typedef bg::cs::spherical_equatorial<bg::degree> CoordSys;
 
-// Points are defined using doubles
-//typedef bg::model::point<double, 2, CoordSys> Point;
-typedef bg::model::d2::point_xy<double, CoordSys> Point;
+    // Points are defined using doubles
+    typedef bg::model::d2::point_xy<double, CoordSys> Point;
 
-typedef bg::model::polygon<Point> Polygon;
-typedef bg::model::multi_polygon<Polygon> MultiPolygon;
+    typedef bg::model::polygon<Point> Polygon;
+    typedef bg::model::multi_polygon<Polygon> MultiPolygon;
 
-static void throwGeoJsonFormattingError(const std::string& msg) {
-    char exMsg[1024];
-    snprintf(exMsg, sizeof(exMsg), "Invalid GeoJSON: %s", msg.c_str());
-    throw SQLException(SQLException::data_exception_invalid_parameter, exMsg);
-}
-
-static Point geoJsonToPoint(const PlannerDomValue& root) {
-
-    std::string geometryType = root.valueForKey("type").asStr();
-    if (! boost::iequals("Point", geometryType)) {
-        throwGeoJsonFormattingError("expected value of \"type\" to be \"Point\"");
+    static void throwGeoJsonFormattingError(const std::string& msg) {
+        char exMsg[1024];
+        snprintf(exMsg, sizeof(exMsg), "Invalid GeoJSON: %s", msg.c_str());
+        throw SQLException(SQLException::data_exception_invalid_parameter, exMsg);
     }
 
-    PlannerDomValue coords = root.valueForKey("coordinates");
-    double xCoord = coords.valueAtIndex(0).asDouble();
-    double yCoord = coords.valueAtIndex(1).asDouble();
+    static std::string getJsonGeometryType(const PlannerDomValue& pdv) {
+        return pdv.valueForKey("type").asStr();
+    }
 
-    return Point(xCoord, yCoord);
-}
+    static Point geoJsonToPoint(const PlannerDomValue& root) {
 
-static Polygon geoJsonToPolygon(const PlannerDomValue& root) {
+        std::string geometryType = getJsonGeometryType(root);
+        if (! boost::iequals("Point", geometryType)) {
+            throwGeoJsonFormattingError("expected value of \"type\" to be \"Point\"");
+        }
 
-    // A GeoJSON polygon is an array of rings, which is an array of
-    // points, which is a 2-element array of coordinates.
-    //
-    // The first ring is the outer ring (area inside the ring is part
-    // of the polygon).  Subsequent rings enclose negative space that
-    // isn't part of the polygon.  E.g., a 2-d donut shape would have
-    // both an inner and outer ring.
-    //
-    // A simple rectangle (one ring):
-    // {
-    //   "type": "Polygon",
-    //   "coordinates": [
-    //     [[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]]
-    //   ]
+        PlannerDomValue coords = root.valueForKey("coordinates");
+        double xCoord = coords.valueAtIndex(0).asDouble();
+        double yCoord = coords.valueAtIndex(1).asDouble();
+
+        return Point(xCoord, yCoord);
+    }
+
+    // static void debugPoly(const Polygon& poly) {
+    //     std::cout << "Polygon: [\n";
+    //     for (auto p : poly.outer()) {
+    //         std::cout << "  (" << p.x() << ", " << p.y() << ")\n";
+    //     }
+    //     std::cout << "]\n";
+
+    //     if (! poly.inners().empty()) {
+    //         std::cout << "Inner rings:\n";
+    //         for (auto inner : poly.inners()) {
+    //             std::cout << "[\n";
+    //             for (auto p : inner) {
+    //                 std::cout << "  (" << p.x() << ", " << p.y() << ")\n";
+    //             }
+    //             std::cout << "[\n";
+    //         }
+    //     }
     // }
 
-    PlannerDomValue outerRing = root.valueForKey("coordinates").valueAtIndex(0);
-    int numPoints = outerRing.arrayLen();
-    Polygon poly;
-    for (int i = 0; i < numPoints; ++i) {
-        double x = outerRing.valueAtIndex(i).valueAtIndex(0).asDouble();
-        double y = outerRing.valueAtIndex(i).valueAtIndex(1).asDouble();
-        bg::append(poly, Point(x, y));
-    }
-
-    return poly;
-}
-
-// static void debugPoly(const Polygon& poly) {
-//     std::cout << "Polygon: [\n";
-//     for (auto p : poly.outer()) {
-//         std::cout << "  (" << p.x() << ", " << p.y() << ")\n";
-//     }
-//     std::cout << "]\n";
-
-//     if (! poly.inners().empty()) {
-//         std::cout << "Inner rings:\n";
-//         for (auto inner : poly.inners()) {
-//             std::cout << "[\n";
-//             for (auto p : inner) {
-//                 std::cout << "  (" << p.x() << ", " << p.y() << ")\n";
-//             }
-//             std::cout << "[\n";
-//         }
-//     }
-// }
-
-static MultiPolygon geoJsonToMultiPolygon(const PlannerDomValue& root) {
-    MultiPolygon multiPoly;
-
-    PlannerDomValue polys = root.valueForKey("coordinates");
-    int numPolys = polys.arrayLen();
-    for (int i = 0; i < numPolys; ++i) {
-
-        PlannerDomValue rings = polys.valueAtIndex(i);
+    Polygon getPolyFromRings(const PlannerDomValue& rings) {
+        Polygon poly;
         int numRings = rings.arrayLen();
         assert(numRings >= 1); // for now only support one ring: the outer one.
-
-        Polygon poly;
         for (int ringIdx = 0; ringIdx < numRings; ++ringIdx) {
+
+            if (ringIdx != 0) {
+                poly.inners().push_back(Polygon::ring_type());
+            }
 
             PlannerDomValue ring = rings.valueAtIndex(ringIdx);
             int numPoints = ring.arrayLen();
@@ -148,144 +117,207 @@ static MultiPolygon geoJsonToMultiPolygon(const PlannerDomValue& root) {
             }
         }
 
-        multiPoly.push_back(poly);
+        return poly;
     }
 
-    // for (auto poly : multiPoly) {
-    //     debugPoly(poly);
-    // }
+    static MultiPolygon geoJsonToMultiPolygon(const PlannerDomValue& root) {
+        MultiPolygon multiPoly;
 
-    bg::correct(multiPoly);
+        std::string geometryType = getJsonGeometryType(root);
+        if (boost::iequals(geometryType, "multipolygon")) {
+            PlannerDomValue polys = root.valueForKey("coordinates");
+            int numPolys = polys.arrayLen();
+            for (int i = 0; i < numPolys; ++i) {
 
-    return multiPoly;
-}
+                PlannerDomValue rings = polys.valueAtIndex(i);
+                multiPoly.push_back(getPolyFromRings(rings));
+            }
+        }
+        else {
+            assert (boost::iequals(geometryType, "polygon"));
+            PlannerDomValue rings = root.valueForKey("coordinates");
+            multiPoly.push_back(getPolyFromRings(rings));
+        }
 
-static std::string geometryType(const PlannerDomValue &domVal) {
-    if (! domVal.hasKey("type"))
-        throwGeoJsonFormattingError("did not find key \"type\"");
-    return domVal.valueForKey("type").asStr();
-}
+        // for (auto poly : multiPoly) {
+        //     debugPoly(poly);
+        // }
 
-template<> NValue NValue::call<FUNC_VOLT_GEO_WITHIN>(const std::vector<NValue>& arguments) {
+        bg::correct(multiPoly);
 
-    assert(arguments.size() == 2);
-
-    const NValue& nvalPoint = arguments[0];
-    const NValue& nvalPoly = arguments[1];
-
-    if (nvalPoint.getValueType() != VALUE_TYPE_VARCHAR) {
-        throwCastSQLException(nvalPoint.getValueType(), VALUE_TYPE_VARCHAR);
+        return multiPoly;
     }
 
-    if (nvalPoly.getValueType() != VALUE_TYPE_VARCHAR) {
-        throwCastSQLException(nvalPoly.getValueType(), VALUE_TYPE_VARCHAR);
+    template<class Geom>
+    static void geoJsonToGeometryHelper(const PlannerDomValue &pdv, Geom& geom);
+
+    template<>
+    void geoJsonToGeometryHelper<Point>(const PlannerDomValue& pdv, Point &pt) {
+        pt = geoJsonToPoint(pdv);
     }
 
-    if (nvalPoint.isNull() || nvalPoly.isNull())
-        return NValue::getNullValue(VALUE_TYPE_INTEGER);
-
-    const char* jsonStrPoint = reinterpret_cast<char*>(nvalPoint.getObjectValue_withoutNull());
-    PlannerDomRoot pdrPoint(jsonStrPoint);
-    PlannerDomValue pdvPoint = pdrPoint.rootObject();
-    assert (boost::iequals(geometryType(pdvPoint), "Point"));
-    Point pt = geoJsonToPoint(pdvPoint);
-
-    const char* jsonStrPoly = reinterpret_cast<char*>(nvalPoly.getObjectValue_withoutNull());
-    PlannerDomRoot pdrPoly(jsonStrPoly);
-    PlannerDomValue pdvPoly = pdrPoly.rootObject();
-
-    bool b;
-
-    // It could be a polygon or multi-polygon
-    if (boost::iequals(geometryType(pdvPoly), "Polygon")) {
-        Polygon poly = geoJsonToPolygon(pdvPoly);
-        b = bg::within(pt, poly);
-    }
-    else {
-        assert(boost::iequals(geometryType(pdvPoly), "MultiPolygon"));
-        MultiPolygon multiPoly = geoJsonToMultiPolygon(pdvPoly);
-        b = bg::within(pt, multiPoly);
+    template<>
+    void geoJsonToGeometryHelper<MultiPolygon>(const PlannerDomValue& pdv, MultiPolygon &pt) {
+        pt = geoJsonToMultiPolygon(pdv);
     }
 
-    NValue result(VALUE_TYPE_INTEGER);
-    if (b) {
-        result.getInteger() = 1;
-    }
-    else {
-        result.getInteger() = 0;
+    template<class Geom>
+    static void geoJsonToGeometry(const NValue& nval, Geom &geom) {
+        void* voidData = ValuePeeker::peekObjectValue_withoutNull(nval);
+        const char* charData = static_cast<char*>(voidData);
+        int32_t len = ValuePeeker::peekObjectLength_withoutNull(nval);
+
+        // This guarantees the data is null-terminated...
+        std::string strData(charData, len);
+
+        PlannerDomRoot pdr(strData.c_str());
+        PlannerDomValue pdv = pdr.rootObject();
+        geoJsonToGeometryHelper(pdv, geom);
     }
 
-    return result;
-}
+    static bool anyNulls(const std::vector<NValue>& args) {
+        for (auto n : args) {
+            if (n.isNull()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static ValueType checkVarcharArgs(const std::vector<NValue>& args) {
+        for (auto n : args) {
+            ValueType vt = ValuePeeker::peekValueType(n);
+            if (vt != VALUE_TYPE_VARCHAR) {
+                return vt;
+            }
+        }
+        return VALUE_TYPE_VARCHAR;
+    }
+
+    template<> NValue NValue::call<FUNC_VOLT_GEO_WITHIN>(const std::vector<NValue>& arguments) {
+        ValueType vt = checkVarcharArgs(arguments);
+        if (vt != VALUE_TYPE_VARCHAR) {
+            throwCastSQLException(vt, VALUE_TYPE_VARCHAR);
+        }
+
+        if (anyNulls(arguments)) {
+            return NValue::getNullValue(VALUE_TYPE_INTEGER);
+        }
+
+        Point pt;
+        geoJsonToGeometry(arguments[0], pt);
+
+        MultiPolygon multiPoly;
+        geoJsonToGeometry(arguments[1], multiPoly);
+
+        bool b = bg::within(pt, multiPoly);
+
+        NValue result(VALUE_TYPE_INTEGER);
+        result.getInteger() = b ? 1 : 0;
+        return result;
+    }
 
     template<> NValue NValue::callUnary<FUNC_VOLT_GEO_AREA>() const {
-
         if (getValueType() != VALUE_TYPE_VARCHAR) {
             throwCastSQLException(getValueType(), VALUE_TYPE_VARCHAR);
         }
 
         if (isNull())
-            return NValue::getNullValue(VALUE_TYPE_INTEGER);
+            return NValue::getNullValue(VALUE_TYPE_DOUBLE);
 
-        const char* jsonStrPoly = reinterpret_cast<char*>(getObjectValue_withoutNull());
-        PlannerDomRoot pdrPoly(jsonStrPoly);
-        PlannerDomValue pdvPoly = pdrPoly.rootObject();
+        MultiPolygon multiPoly;
+        geoJsonToGeometry(*this, multiPoly);
 
-        double area;
-
-        // It could be a polygon or multi-polygon
-        if (boost::iequals(geometryType(pdvPoly), "Polygon")) {
-            Polygon poly = geoJsonToPolygon(pdvPoly);
-            area = bg::area(poly);
-        }
-        else {
-            assert(boost::iequals(geometryType(pdvPoly), "MultiPolygon"));
-            MultiPolygon multiPoly = geoJsonToMultiPolygon(pdvPoly);
-            area = bg::area(multiPoly);
-        }
-
+        double area = bg::area(multiPoly);
         NValue result(VALUE_TYPE_DOUBLE);
         result.getDouble() = area;
 
         return result;
     }
 
-template<> NValue NValue::call<FUNC_VOLT_GEO_DISTANCE>(const std::vector<NValue>& arguments) {
-
-    assert(arguments.size() == 2);
-    Point pts[2];
-
-    for (int i = 0; i < 2; ++i) {
-        const NValue& nval = arguments[i];
-
-        if (nval.getValueType() != VALUE_TYPE_VARCHAR) {
-            throwCastSQLException(nval.getValueType(), VALUE_TYPE_VARCHAR);
+    template<> NValue NValue::call<FUNC_VOLT_GEO_DISTANCE>(const std::vector<NValue>& arguments) {
+        ValueType vt = checkVarcharArgs(arguments);
+        if (vt != VALUE_TYPE_VARCHAR) {
+            throwCastSQLException(vt, VALUE_TYPE_VARCHAR);
         }
 
-        if (nval.isNull()) {
+        if (anyNulls(arguments)) {
             return NValue::getNullValue(VALUE_TYPE_DOUBLE);
         }
 
-        const char* json = reinterpret_cast<char*>(nval.getObjectValue_withoutNull());
-        PlannerDomRoot pdr(json);
-        PlannerDomValue pdv = pdr.rootObject();
-        assert (boost::iequals(geometryType(pdv), "Point"));
-        pts[i] = geoJsonToPoint(pdv);
+        Point p1;
+        geoJsonToGeometry(arguments[0], p1);
+
+        Point p2;
+        geoJsonToGeometry(arguments[1], p2);
+
+        double dist = bg::distance(p1, p2);
+        NValue result(VALUE_TYPE_DOUBLE);
+        result.getDouble() = dist;
+        return result;
     }
 
-    double dist = bg::distance(pts[0], pts[1]);
-    NValue result(VALUE_TYPE_DOUBLE);
-    result.getDouble() = dist;
-    return result;
-}
+    template<> NValue NValue::callUnary<FUNC_VOLT_GEO_NUM_POLYGONS>() const {
+        if (getValueType() != VALUE_TYPE_VARCHAR) {
+            throwCastSQLException(getValueType(), VALUE_TYPE_VARCHAR);
+        }
+
+        if (isNull())
+            return NValue::getNullValue(VALUE_TYPE_BIGINT);
+
+        MultiPolygon multiPoly;
+        geoJsonToGeometry(*this, multiPoly);
+
+        std::size_t numGeoms = bg::num_geometries(multiPoly);
+        NValue result(VALUE_TYPE_BIGINT);
+        result.getBigInt() = numGeoms;
+
+        return result;
+    }
+
+    template<> NValue NValue::callUnary<FUNC_VOLT_GEO_NUM_INTERIOR_RINGS>() const {
+        if (getValueType() != VALUE_TYPE_VARCHAR) {
+            throwCastSQLException(getValueType(), VALUE_TYPE_VARCHAR);
+        }
+
+        if (isNull())
+            return NValue::getNullValue(VALUE_TYPE_BIGINT);
+
+        MultiPolygon multiPoly;
+        geoJsonToGeometry(*this, multiPoly);
+
+        std::size_t numInteriorRings = bg::num_interior_rings(multiPoly);
+        NValue result(VALUE_TYPE_BIGINT);
+        result.getBigInt() = numInteriorRings;
+
+        return result;
+    }
+
+    template<> NValue NValue::callUnary<FUNC_VOLT_GEO_NUM_POINTS>() const {
+        if (getValueType() != VALUE_TYPE_VARCHAR) {
+            throwCastSQLException(getValueType(), VALUE_TYPE_VARCHAR);
+        }
+
+        if (isNull())
+            return NValue::getNullValue(VALUE_TYPE_BIGINT);
+
+        MultiPolygon multiPoly;
+        geoJsonToGeometry(*this, multiPoly);
+
+        std::size_t numPoints = bg::num_points(multiPoly);
+        NValue result(VALUE_TYPE_BIGINT);
+        result.getBigInt() = numPoints;
+
+        return result;
+    }
+
+
 
     // Interesting geo functions:
     //   centroid
-    //   distance
     //   num_geometries
     //   num_interior_rings
     //   num_points
     //   perimeter
-    //   within
 
 } // end namespace voltdb

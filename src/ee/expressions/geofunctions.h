@@ -25,6 +25,9 @@ namespace voltdb {
 template<> NValue NValue::call<FUNC_VOLT_GEO_WITHIN>(const std::vector<NValue>& arguments);
 template<> NValue NValue::callUnary<FUNC_VOLT_GEO_AREA>() const;
 template<> NValue NValue::call<FUNC_VOLT_GEO_DISTANCE>(const std::vector<NValue>& arguments);
+template<> NValue NValue::callUnary<FUNC_VOLT_GEO_NUM_POLYGONS>() const;
+template<> NValue NValue::callUnary<FUNC_VOLT_GEO_NUM_INTERIOR_RINGS>() const;
+template<> NValue NValue::callUnary<FUNC_VOLT_GEO_NUM_POINTS>() const;
 
 } // end namespace voltdb
 

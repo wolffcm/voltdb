@@ -334,6 +334,15 @@ ExpressionUtil::functionFactory(int functionId, const std::vector<AbstractExpres
         case FUNC_VOLT_GEO_AREA:
             ret = new UnaryFunctionExpression<FUNC_VOLT_GEO_AREA>((*arguments)[0]);
             break;
+        case FUNC_VOLT_GEO_NUM_POLYGONS:
+            ret = new UnaryFunctionExpression<FUNC_VOLT_GEO_NUM_POLYGONS>((*arguments)[0]);
+            break;
+        case FUNC_VOLT_GEO_NUM_INTERIOR_RINGS:
+            ret = new UnaryFunctionExpression<FUNC_VOLT_GEO_NUM_INTERIOR_RINGS>((*arguments)[0]);
+            break;
+        case FUNC_VOLT_GEO_NUM_POINTS:
+            ret = new UnaryFunctionExpression<FUNC_VOLT_GEO_NUM_POINTS>((*arguments)[0]);
+            break;
         default:
             return NULL;
         }

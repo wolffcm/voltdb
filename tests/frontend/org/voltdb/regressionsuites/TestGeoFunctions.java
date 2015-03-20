@@ -40,7 +40,39 @@ import org.voltdb_testprocs.regressionsuites.fixedsql.Insert;
 
 public class TestGeoFunctions extends RegressionSuite {
 
-    public void testGeoDistance() throws Exception {
+    public void testGeoNumFuntions() throws Exception {
+        Client client = getClient();
+
+        client.callProcedure("regions.Insert", 0, "Square Donut",
+                "{\n"
+                + "\"type\": \"Polygon\",\n"
+                + "\"coordinates\": [\n"
+                + "  ["
+                + "    [0, 0], "
+                + "    [0, 3], "
+                + "    [3, 3], "
+                + "    [3, 0], "
+                + "    [0, 0] "
+                + "  ],\n"
+                + "  ["
+                + "    [1, 1], "
+                + "    [1, 2], "
+                + "    [2, 2], "
+                + "    [2, 1], "
+                + "    [1, 1] "
+                + "  ]\n"
+                + "]\n"
+                + "}\n");
+        VoltTable vt = client.callProcedure("@AdHoc",
+                "select geo_num_polygons(regions.geo_json) as num_polys, "
+                + "  geo_num_interior_rings(regions.geo_json) as num_int_rings, "
+                + "  geo_num_points(regions.geo_json) as num_points "
+                + "from regions")
+                .getResults()[0];
+        System.out.println(vt);
+    }
+
+    public void tetGeoDistance() throws Exception {
         Client client = getClient();
         client.callProcedure("points.Insert", 0, "New York City",
                 "{"
@@ -64,7 +96,7 @@ public class TestGeoFunctions extends RegressionSuite {
         System.out.println(vt);
     }
 
-    public void testGeoArea() throws Exception {
+    public void tetGeoArea() throws Exception {
         Client client = getClient();
         client.callProcedure("regions.Insert", 0, "Square",
                 "{\n"
@@ -102,7 +134,7 @@ public class TestGeoFunctions extends RegressionSuite {
         System.out.println(vt);
     }
 
-    public void testGeoWithin() throws Exception {
+    public void tetGeoWithin() throws Exception {
         Client client = getClient();
 
         // Wyoming: a nice big state with easily modeled borders
