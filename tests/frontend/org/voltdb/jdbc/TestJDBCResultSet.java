@@ -40,7 +40,6 @@ import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.voltdb.BackendTarget;
 import org.voltdb.ServerThread;
 import org.voltdb.VoltDB.Configuration;
 import org.voltdb.compiler.VoltProjectBuilder;
@@ -138,8 +137,7 @@ public class TestJDBCResultSet {
 
     private static void startServer() throws ClassNotFoundException,
             SQLException {
-        voltDBServer = new ServerThread(testjar, pb.getPathToDeployment(),
-                BackendTarget.NATIVE_EE_JNI);
+        voltDBServer = new ServerThread(testjar, pb.getPathToDeployment());
         voltDBServer.start();
         voltDBServer.waitForInitialization();
 

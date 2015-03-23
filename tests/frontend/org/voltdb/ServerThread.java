@@ -53,26 +53,10 @@ public class ServerThread extends Thread {
         setName("ServerThread");
     }
 
-    public ServerThread(String pathToCatalog, BackendTarget target) {
-        m_config = new VoltDB.Configuration();
-        m_config.m_pathToCatalog = pathToCatalog;
-        m_config.m_backend = target;
-        m_config.m_pathToLicense = getTestLicensePath();
-        m_config.m_leader = "";
-        VoltDB.instance().setMode(OperationMode.INITIALIZING);
-
-
-        // Disable loading the EE if running against HSQL.
-        m_config.m_noLoadLibVOLTDB = m_config.m_backend == BackendTarget.HSQLDB_BACKEND;
-
-        setName("ServerThread");
-    }
-
-    public ServerThread(String pathToCatalog, String pathToDeployment, BackendTarget target) {
+    public ServerThread(String pathToCatalog, String pathToDeployment) {
         m_config = new VoltDB.Configuration();
         m_config.m_pathToCatalog = pathToCatalog;
         m_config.m_pathToDeployment = pathToDeployment;
-        m_config.m_backend = target;
         m_config.m_pathToLicense = getTestLicensePath();
         m_config.m_leader = "";
         VoltDB.instance().setMode(OperationMode.INITIALIZING);
@@ -86,14 +70,6 @@ public class ServerThread extends Thread {
         }
 
         setName("ServerThread");
-    }
-
-    public ServerThread(String pathToCatalog,
-            String pathToDeployment,
-            int internalPort,
-            int zkPort,
-            BackendTarget target) {
-        this(pathToCatalog, pathToDeployment, VoltDB.DEFAULT_INTERNAL_PORT, internalPort, zkPort, target);
     }
 
     public ServerThread(String pathToCatalog,

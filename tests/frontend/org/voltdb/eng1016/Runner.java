@@ -25,7 +25,6 @@ package org.voltdb.eng1016;
 
 import junit.framework.TestCase;
 
-import org.voltdb.BackendTarget;
 import org.voltdb.ServerThread;
 import org.voltdb.VoltDB.Configuration;
 import org.voltdb.VoltTable;
@@ -59,7 +58,7 @@ public class Runner extends TestCase {
         String pathToDeployment = project.getPathToDeployment();
 
         // start up voltdb
-        ServerThread server = new ServerThread(Configuration.getPathToCatalogForTest("poc.jar"), pathToDeployment, BackendTarget.NATIVE_EE_JNI);
+        ServerThread server = new ServerThread(Configuration.getPathToCatalogForTest("poc.jar"), pathToDeployment);
         server.start();
         server.waitForInitialization();
 

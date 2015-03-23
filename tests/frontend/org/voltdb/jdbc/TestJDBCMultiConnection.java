@@ -37,7 +37,6 @@ import java.util.List;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.voltdb.BackendTarget;
 import org.voltdb.ServerThread;
 import org.voltdb.VoltDB.Configuration;
 import org.voltdb.client.ArbitraryDurationProc;
@@ -91,8 +90,7 @@ public class TestJDBCMultiConnection {
 
     private static void startServer()
     {
-        m_server = new ServerThread(m_testJar, m_projectBuilder.getPathToDeployment(),
-                                  BackendTarget.NATIVE_EE_JNI);
+        m_server = new ServerThread(m_testJar, m_projectBuilder.getPathToDeployment());
         m_server.start();
         m_server.waitForInitialization();
     }

@@ -28,7 +28,6 @@ import java.io.IOException;
 
 import junit.framework.TestCase;
 
-import org.voltdb.BackendTarget;
 import org.voltdb.ServerThread;
 import org.voltdb.VoltTable;
 import org.voltdb.benchmark.tpcc.Constants;
@@ -65,7 +64,6 @@ public class TPCCDebugTest extends TestCase {
     public void setUp() throws IOException {
         Class<?>[] procedures = ALL_PROCEDURES;
         int siteCount = 1;
-        BackendTarget target = BackendTarget.NATIVE_EE_JNI;
         String testDir = BuildDirectoryUtils.getBuildDirectoryPath();
         String catalogJar = testDir + File.separator + JAR;
 
@@ -77,7 +75,7 @@ public class TPCCDebugTest extends TestCase {
         pb.compile(catalogJar, siteCount, 0);
 
         // start VoltDB server using hzsqlsb backend
-        server = new ServerThread(catalogJar, pb.getPathToDeployment(), target);
+        server = new ServerThread(catalogJar, pb.getPathToDeployment());
         server.start();
         server.waitForInitialization();
 

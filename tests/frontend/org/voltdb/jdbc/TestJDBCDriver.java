@@ -50,7 +50,6 @@ import java.util.regex.Pattern;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.voltdb.BackendTarget;
 import org.voltdb.ServerThread;
 import org.voltdb.VoltDB.Configuration;
 import org.voltdb.VoltType;
@@ -128,8 +127,7 @@ public class TestJDBCDriver {
     }
 
     private static void startServer() throws ClassNotFoundException, SQLException {
-        server = new ServerThread(testjar, pb.getPathToDeployment(),
-                                  BackendTarget.NATIVE_EE_JNI);
+        server = new ServerThread(testjar, pb.getPathToDeployment());
         server.start();
         server.waitForInitialization();
 

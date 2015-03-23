@@ -131,14 +131,14 @@ public class TestCatalogUtil extends TestCase {
         }
     }
 
-    public void testDeploymentHeartbeatConfig()
+    public void testDeploymentHeartbeatConfig() throws Exception
     {
         DeploymentType dep = CatalogUtil.parseDeploymentFromString(
             "<?xml version='1.0' encoding='UTF-8' standalone='no'?>" +
             "<deployment>" +
             "   <cluster hostcount='3' kfactor='1' sitesperhost='2'/>" +
             "   <admin-mode port='32323' adminstartup='true'/>" +
-            "   <heartbeat timeout='30'/>" +
+            "   <heartbeat timeout='30'/>" + // set here to non-default
             "   <paths><voltdbroot path=\"/tmp/" + System.getProperty("user.name") + "\" /></paths>" +
             "   <httpd port='0' >" +
             "       <jsonapi enabled='true'/>" +
@@ -151,19 +151,7 @@ public class TestCatalogUtil extends TestCase {
             "<deployment>" +
             "   <cluster hostcount='3' kfactor='1' sitesperhost='2'/>" +
             "   <admin-mode port='32323' adminstartup='true'/>" +
-            "   <paths><voltdbroot path=\"/tmp/" + System.getProperty("user.name") + "\" /></paths>" +
-            "   <httpd port='0' >" +
-            "       <jsonapi enabled='true'/>" +
-            "   </httpd>" +
-            "</deployment>");
-
-        // make sure someone can't give us 0 for timeout value
-        DeploymentType boom = CatalogUtil.parseDeploymentFromString(
-            "<?xml version='1.0' encoding='UTF-8' standalone='no'?>" +
-            "<deployment>" +
-            "   <cluster hostcount='3' kfactor='1' sitesperhost='2'/>" +
-            "   <admin-mode port='32323' adminstartup='true'/>" +
-            "   <heartbeat timeout='0'/>" +
+            // heartbeat timeout left to default here
             "   <paths><voltdbroot path=\"/tmp/" + System.getProperty("user.name") + "\" /></paths>" +
             "   <httpd port='0' >" +
             "       <jsonapi enabled='true'/>" +
@@ -171,20 +159,31 @@ public class TestCatalogUtil extends TestCase {
             "</deployment>");
 
         String msg = CatalogUtil.compileDeployment(catalog, dep);
+        assertNull(msg);
+        Cluster cluster = catalog.getClusters().get("cluster");
+        assertEquals(30, cluster.getHeartbeattimeout());
 
-        assertEquals(30, catalog.getClusters().get("cluster").getHeartbeattimeout());
-
-        catalog = new Catalog();
-        Cluster cluster = catalog.getClusters().add("cluster");
-        cluster.getDatabases().add("database");
+        setUp();
         msg = CatalogUtil.compileDeployment(catalog, def);
+        assertNull(msg);
+        cluster = catalog.getClusters().get("cluster");
         assertEquals(org.voltcore.common.Constants.DEFAULT_HEARTBEAT_TIMEOUT_SECONDS,
-                catalog.getClusters().get("cluster").getHeartbeattimeout());
+                cluster.getHeartbeattimeout());
 
-        // This returns error text on schema violation
-        msg = CatalogUtil.compileDeployment(catalog, boom);
-        assertTrue(msg != null);
-        assertTrue(msg.contains("Error parsing deployment file"));
+        // make sure someone can't give us 0 for timeout value
+        // This returns null on schema violation.
+        DeploymentType boom = CatalogUtil.parseDeploymentFromString(
+            "<?xml version='1.0' encoding='UTF-8' standalone='no'?>" +
+            "<deployment>" +
+            "   <cluster hostcount='3' kfactor='1' sitesperhost='2'/>" +
+            "   <admin-mode port='32323' adminstartup='true'/>" +
+            "   <heartbeat timeout='0'/>" + // heartbeat timeout corrupted with 0 value here
+            "   <paths><voltdbroot path=\"/tmp/" + System.getProperty("user.name") + "\" /></paths>" +
+            "   <httpd port='0' >" +
+            "       <jsonapi enabled='true'/>" +
+            "   </httpd>" +
+            "</deployment>");
+        assertNull(boom);
     }
 
     public void testAutoSnapshotEnabledFlag() throws Exception

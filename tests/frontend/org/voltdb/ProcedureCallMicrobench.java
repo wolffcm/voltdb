@@ -52,8 +52,7 @@ public class ProcedureCallMicrobench {
 
         pb.compile("procedureCallMicrobench.jar", siteCount, 0);
 
-        ServerThread server = new ServerThread("procedureCallMicrobench.jar",
-                BackendTarget.NATIVE_EE_JNI);
+        ServerThread server = new ServerThread("procedureCallMicrobench.jar", null);
         server.start();
         server.waitForInitialization();
 

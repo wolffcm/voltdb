@@ -574,6 +574,8 @@ public abstract class CatalogUtil {
             setHTTPDInfo(catalog, deployment.getHttpd());
 
             setCommandLogInfo(catalog, deployment.getCommandlog());
+
+            setDrInfo(catalog, deployment.getDr());
             return null;
         }
         catch (Exception e) {
@@ -590,29 +592,26 @@ public abstract class CatalogUtil {
      * Add deployment data into the catalog.
      * @param catalog Catalog to be updated.
      * @param deployment Parsed representation of the deployment.xml file.
-     * @param isPlaceHolderCatalog if the catalog is isPlaceHolderCatalog and we are verifying only deployment xml.
      * @return String containing any errors parsing/validating the deployment. NULL on success.
      */
     public static String compileDeployment(Catalog catalog, DeploymentType deployment)
     {
         String errmsg = compileDeploymentNoUsersOrExport(catalog, deployment);
-        try {
-            if (errmsg == null) {
+        if (errmsg == null) {
+            try {
                 setUsersInfo(catalog, deployment.getUsers());
                 setExportInfo(catalog, deployment.getExport());
             }
-            setCommandLogInfo(catalog, deployment.getCommandlog());
-            setDrInfo(catalog, deployment.getDr());
-            return null;
+            catch (Exception e) {
+                // Anything that goes wrong anywhere in trying to handle the deployment file
+                // should return an error, and let the caller decide what to do (crash or not, for
+                // example)
+                errmsg = "Error validating deployment configuration: " + e.getMessage();
+                hostLog.error(errmsg);
+                return errmsg;
+            }
         }
-        catch (Exception e) {
-            // Anything that goes wrong anywhere in trying to handle the deployment file
-            // should return an error, and let the caller decide what to do (crash or not, for
-            // example)
-            errmsg = "Error validating deployment configuration: " + e.getMessage();
-            hostLog.error(errmsg);
-            return errmsg;
-        }
+        return errmsg;
     }
 
     /*
