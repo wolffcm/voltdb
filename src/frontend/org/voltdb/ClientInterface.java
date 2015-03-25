@@ -105,6 +105,7 @@ import org.voltdb.messaging.Iv2EndOfLogMessage;
 import org.voltdb.messaging.Iv2InitiateTaskMessage;
 import org.voltdb.messaging.LocalMailbox;
 import org.voltdb.messaging.MultiPartitionParticipantMessage;
+import org.voltdb.parser.SQLLexer;
 import org.voltdb.security.AuthenticationRequest;
 import org.voltdb.sysprocs.saverestore.SnapshotUtil;
 import org.voltdb.utils.Encoder;
@@ -149,6 +150,7 @@ public class ClientInterface implements SnapshotDaemon.DaemonInitiator {
     public static final long RESTORE_AGENT_CID          = Long.MIN_VALUE + 1;
     public static final long SNAPSHOT_UTIL_CID          = Long.MIN_VALUE + 2;
     public static final long ELASTIC_JOIN_CID           = Long.MIN_VALUE + 3;
+    public static final long DR_REPLICATION_CID         = Long.MIN_VALUE + 4;
     // Leave CL_REPLAY_BASE_CID at the end, it uses this as a base and generates more cids
     public static final long CL_REPLAY_BASE_CID         = Long.MIN_VALUE + 100;
 
@@ -782,7 +784,7 @@ public class ClientInterface implements SnapshotDaemon.DaemonInitiator {
         public void started(final Connection c) {
             m_connection = c;
             m_cihm.put(c.connectionId(),
-                       new ClientInterfaceHandleManager( m_isAdmin, c, m_acg.get()));
+                       new ClientInterfaceHandleManager( m_isAdmin, c, null, m_acg.get()));
             m_acg.get().addMember(this);
             if (!m_acg.get().hasBackPressure()) {
                 c.enableReadSelection();
@@ -1237,6 +1239,10 @@ public class ClientInterface implements SnapshotDaemon.DaemonInitiator {
             buf.flip();
             c.writeStream().enqueue(buf);
         }
+
+        if (cihm.repairCallback != null) {
+            cihm.repairCallback.repairCompleted(partitionId, initiatorHSId);
+        }
     }
 
     /**
@@ -1254,7 +1260,7 @@ public class ClientInterface implements SnapshotDaemon.DaemonInitiator {
         m_snapshotDaemon.init(this, messenger, new Runnable() {
             @Override
             public void run() {
-                bindAdapter(m_snapshotDaemonAdapter);
+                bindAdapter(m_snapshotDaemonAdapter, null);
             }
         },
         gse);
@@ -1263,9 +1269,9 @@ public class ClientInterface implements SnapshotDaemon.DaemonInitiator {
     /**
      * Tell the clientInterface about a connection adapter.
      */
-    public void bindAdapter(final Connection adapter) {
+    public void bindAdapter(final Connection adapter, final ClientInterfaceRepairCallback repairCallback) {
         m_cihm.put(adapter.connectionId(),
-                ClientInterfaceHandleManager.makeThreadSafeCIHM(true, adapter,
+                ClientInterfaceHandleManager.makeThreadSafeCIHM(true, adapter, repairCallback,
                     AdmissionControlGroup.getDummy()));
     }
 
@@ -1393,8 +1399,13 @@ public class ClientInterface implements SnapshotDaemon.DaemonInitiator {
     // Go to the catalog and fetch all the "explain plan" strings of the queries in the procedure.
     ClientResponseImpl dispatchExplainProcedure(StoredProcedureInvocation task, ClientInputHandler handler, Connection ccxn, AuthUser user) {
         ParameterSet params = task.getParams();
+        /*
+         * TODO: We don't actually support multiple proc names in an ExplainProc call,
+         * so I THINK that the string is always a single procname symbol and all this
+         * splitting and iterating is a no-op.
+         */
         //String procs = (String) params.toArray()[0];
-        List<String> procNames = MiscUtils.splitSQLStatements( (String)params.toArray()[0]);
+        List<String> procNames = SQLLexer.splitStatements( (String)params.toArray()[0]);
         int size = procNames.size();
         VoltTable[] vt = new VoltTable[ size ];
         for( int i=0; i<size; i++ ) {
@@ -1480,7 +1491,7 @@ public class ClientInterface implements SnapshotDaemon.DaemonInitiator {
     private final void dispatchAdHocCommon(StoredProcedureInvocation task,
             ClientInputHandler handler, Connection ccxn, ExplainMode explainMode,
             String sql, Object[] userParams, Object[] userPartitionKey, AuthSystem.AuthUser user) {
-        List<String> sqlStatements = MiscUtils.splitSQLStatements(sql);
+        List<String> sqlStatements = SQLLexer.splitStatements(sql);
         String[] stmtsArray = sqlStatements.toArray(new String[sqlStatements.size()]);
 
         AdHocPlannerWork ahpw = new AdHocPlannerWork(
@@ -2151,6 +2162,14 @@ public class ClientInterface implements SnapshotDaemon.DaemonInitiator {
             error.flattenToBuffer(buffer).flip();
             c.writeStream().enqueue(buffer);
         }
+        else
+        if ((error = m_invocationValidator.shouldAccept(task.procName, plannedStmtBatch.work.user, task,
+                SystemProcedureCatalog.listing.get(task.procName).asCatalogProcedure())) != null) {
+            ByteBuffer buffer = ByteBuffer.allocate(error.getSerializedSize() + 4);
+            buffer.putInt(buffer.capacity() - 4);
+            error.flattenToBuffer(buffer).flip();
+            c.writeStream().enqueue(buffer);
+        }
         else {
             /*
              * Round trip the invocation to initialize it for command logging
@@ -2191,7 +2210,8 @@ public class ClientInterface implements SnapshotDaemon.DaemonInitiator {
 
                         // assume all stmts have the same catalog version
                         if ((plannedStmtBatch.getPlannedStatementCount() > 0) &&
-                            (plannedStmtBatch.getPlannedStatement(0).core.catalogVersion != m_catalogContext.get().catalogVersion)) {
+                            (!plannedStmtBatch.getPlannedStatement(0).core.wasPlannedAgainstHash(m_catalogContext.get().getCatalogHash())))
+                        {
 
                             /* The adhoc planner learns of catalog updates after the EE and the
                                rest of the system. If the adhoc sql was planned against an

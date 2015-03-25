@@ -55,11 +55,13 @@ import org.voltdb.catalog.Procedure;
 import org.voltdb.catalog.SnapshotSchedule;
 import org.voltdb.catalog.Statement;
 import org.voltdb.catalog.Table;
+import org.voltdb.common.Constants;
 import org.voltdb.compiler.VoltCompiler.Feedback;
 import org.voltdb.compiler.VoltCompiler.VoltCompilerException;
 import org.voltdb.types.IndexType;
 import org.voltdb.utils.BuildDirectoryUtils;
 import org.voltdb.utils.CatalogUtil;
+import org.voltdb.utils.MiscUtils;
 
 public class TestVoltCompiler extends TestCase {
 
@@ -429,7 +431,7 @@ public class TestVoltCompiler extends TestCase {
             cat.execute(catalogContents);
 
             Connector connector = cat.getClusters().get("cluster").getDatabases().
-                get("database").getConnectors().get("0");
+                get("database").getConnectors().get(Constants.DEFAULT_EXPORT_CONNECTOR_NAME);
             assertFalse(connector.getEnabled());
 
         } finally {
@@ -441,6 +443,8 @@ public class TestVoltCompiler extends TestCase {
 
     // test that Export configuration is insensitive to the case of the table name
     public void testExportTableCase() throws IOException {
+        if (!MiscUtils.isPro()) { return; } // not supported in community
+
         final VoltProjectBuilder project = new VoltProjectBuilder();
         project.addSchema(TestVoltCompiler.class.getResource("ExportTester-ddl.sql"));
         project.addStmtProcedure("Dummy", "insert into a values (?, ?, ?);",
@@ -462,7 +466,7 @@ public class TestVoltCompiler extends TestCase {
             cat.execute(catalogContents);
             CatalogUtil.compileDeployment(cat, project.getPathToDeployment(), false);
             Connector connector = cat.getClusters().get("cluster").getDatabases().
-                get("database").getConnectors().get("0");
+                get("database").getConnectors().get(Constants.DEFAULT_EXPORT_CONNECTOR_NAME);
             assertTrue(connector.getEnabled());
             // Assert that all tables exist in the connector section of catalog
             assertNotNull(connector.getTableinfo().getIgnoreCase("a"));
@@ -2296,8 +2300,32 @@ public class TestVoltCompiler extends TestCase {
         checkDDLErrorMessage(ddl, "Materialized view \"MY_VIEW\" with LIMIT or OFFSET clause is not supported.");
 
         ddl = "create table t(id integer not null, num integer);\n" +
+                "create view my_view as select num, count(*) from t group by num offset 10;";
+        checkDDLErrorMessage(ddl, "Materialized view \"MY_VIEW\" with LIMIT or OFFSET clause is not supported.");
+
+        ddl = "create table t(id integer not null, num integer);\n" +
                 "create view my_view as select num, count(*) from t group by num having count(*) > 3;";
         checkDDLErrorMessage(ddl, "Materialized view \"MY_VIEW\" with HAVING clause is not supported.");
+
+        String errorMsg = "In database, the materialized view is automatically "
+                + "partitioned based on its source table. Invalid PARTITION statement on view table MY_VIEW.";
+
+        ddl = "create table t(id integer not null, num integer not null);\n" +
+                "partition table t on column num;\n" +
+                "create view my_view as select num, count(*) from t group by num;\n" +
+                "partition table my_view on column num;";
+        checkDDLErrorMessage(ddl, errorMsg);
+
+        ddl = "create table t(id integer not null, num integer not null);\n" +
+                "partition table t on column num;" +
+                "create view my_view as select num, count(*) as ct from t group by num;" +
+                "partition table my_view on column ct;";
+        checkDDLErrorMessage(ddl, errorMsg);
+
+        ddl = "create table t(id integer not null, num integer not null);\n" +
+                "create view my_view as select num, count(*) from t group by num;" +
+                "partition table my_view on column num;";
+        checkDDLErrorMessage(ddl, errorMsg);
     }
 
     public void testDDLCompilerTableLimit()
@@ -2459,29 +2487,23 @@ public class TestVoltCompiler extends TestCase {
                 assertEquals(Integer.MAX_VALUE, tbl.getTuplelimit());
             }
 
-            Statement stmt = null;
-            try {
-                stmt = tbl.getTuplelimitdeletestmt().iterator().next();
-            }
-            catch (NoSuchElementException nse) {
-            }
+            String stmt = CatalogUtil.getLimitPartitionRowsDeleteStmt(tbl);
 
             if (expectedStmt == null) {
                 assertTrue("Did not expect to find a LIMIT DELETE statement, but found this one:\n"
-                        + (stmt != null ? stmt.getSqltext() : ""),
+                        + (stmt != null ? stmt : ""),
                         stmt == null);
             } else {
                 // Make sure we have the delete statement that we expected
                 assertTrue("Expected to find LIMIT DELETE statement, found none", stmt != null);
 
-                String sql = stmt.getSqltext();
-                if (sql.endsWith(";")) {
+                if (stmt.endsWith(";")) {
                     // We seem to add a semicolon somewhere.  I guess that's okay.
-                    sql = sql.substring(0, sql.length() - 1);
+                    stmt = stmt.substring(0, stmt.length() - 1);
                 }
 
                 assertEquals("Did not find the LIMIT DELETE statement that we expected",
-                        expectedStmt, sql);
+                        expectedStmt, stmt);
             }
         }
     }
@@ -2939,15 +2961,6 @@ public class TestVoltCompiler extends TestCase {
         fbs = checkInvalidProcedureDDL(
                 "CREATE TABLE PKEY_INTEGER ( PKEY INTEGER NOT NULL, DESCR VARCHAR(128), PRIMARY KEY (PKEY) );" +
                 "PARTITION TABLE PKEY_INTEGER ON COLUMN PKEY;" +
-                "CREATE PROCEDURE org.kanamuri.Foo AS DELETE FROM PKEY_INTEGER;" +
-                "PARTITION PROCEDURE Foo ON TABLE PKEY_INTEGER COLUMN PKEY;"
-                );
-        expectedError = "PartitionInfo specifies invalid parameter index for procedure: org.kanamuri.Foo";
-        assertTrue(isFeedbackPresent(expectedError, fbs));
-
-        fbs = checkInvalidProcedureDDL(
-                "CREATE TABLE PKEY_INTEGER ( PKEY INTEGER NOT NULL, DESCR VARCHAR(128), PRIMARY KEY (PKEY) );" +
-                "PARTITION TABLE PKEY_INTEGER ON COLUMN PKEY;" +
                 "CREATE PROCEDURE 7Foo AS DELETE FROM PKEY_INTEGER WHERE PKEY = ?;" +
                 "PARTITION PROCEDURE 7Foo ON TABLE PKEY_INTEGER COLUMN PKEY;"
                 );
@@ -3096,7 +3109,7 @@ public class TestVoltCompiler extends TestCase {
                 "### LANGUAGE KROOVY;\n" +
                 "PARTITION PROCEDURE Foo ON TABLE PKEY_INTEGER COLUMN PKEY;"
                 );
-        expectedError = "### LANGUAGE KROOVY\", expected syntax: \"CREATE PROCEDURE [ALLOW";
+        expectedError = "Language \"KROOVY\" is not a supported";
         assertTrue(isFeedbackPresent(expectedError, fbs));
     }
 
@@ -3633,7 +3646,7 @@ public class TestVoltCompiler extends TestCase {
     }
 
     private ConnectorTableInfo getConnectorTableInfoFor( Database db, String tableName) {
-        Connector connector =  db.getConnectors().get("0");
+        Connector connector =  db.getConnectors().get(Constants.DEFAULT_EXPORT_CONNECTOR_NAME);
         if( connector == null) return null;
         return connector.getTableinfo().getIgnoreCase(tableName);
     }
@@ -3696,6 +3709,66 @@ public class TestVoltCompiler extends TestCase {
                 );
     }
 
+    public void testGoodDRTable() throws Exception {
+        Database db;
+
+        db = goodDDLAgainstSimpleSchema(
+                "create table e1 (id integer not null, f1 varchar(16));",
+                "partition table e1 on column id;",
+                "dr table e1;"
+                );
+        assertTrue(db.getTables().getIgnoreCase("e1").getIsdred());
+
+        String schema = "create table e1 (id integer not null, f1 varchar(16));\n" +
+                        "create table e2 (id integer not null, f1 varchar(16));\n" +
+                        "partition table e1 on column id;";
+
+        db = goodDDLAgainstSimpleSchema(
+                schema,
+                "dr table e1;",
+                "DR TABLE E2;"
+                );
+        assertTrue(db.getTables().getIgnoreCase("e1").getIsdred());
+        assertTrue(db.getTables().getIgnoreCase("e2").getIsdred());
+
+        // DR statement is order sensitive
+        db = goodDDLAgainstSimpleSchema(
+                schema,
+                "dr table e2;",
+                "dr table e2 disable;"
+                );
+        assertFalse(db.getTables().getIgnoreCase("e2").getIsdred());
+
+        db = goodDDLAgainstSimpleSchema(
+                schema,
+                "dr table e2 disable;",
+                "dr table e2;"
+                );
+        assertTrue(db.getTables().getIgnoreCase("e2").getIsdred());
+    }
+
+    public void testBadDRTable() throws Exception {
+        badDDLAgainstSimpleSchema(".+\\sdr, table non_existant was not present in the catalog.*",
+                "dr table non_existant;"
+                );
+
+        badDDLAgainstSimpleSchema(".+contains invalid identifier \"1table_name_not_valid\".*",
+                "dr table 1table_name_not_valid;"
+                );
+
+        badDDLAgainstSimpleSchema(".+Invalid DR TABLE statement.*",
+                "dr table one, two, three;"
+                );
+
+        badDDLAgainstSimpleSchema(".+Invalid DR TABLE statement.*",
+                "dr dr table one;"
+                );
+
+        badDDLAgainstSimpleSchema(".+Invalid DR TABLE statement.*",
+                "dr table table one;"
+                );
+    }
+
     public void testCompileFromDDL() throws IOException {
         final String simpleSchema1 =
             "create table table1r_el  (pkey integer, column2_integer integer, PRIMARY KEY(pkey));\n" +
@@ -3723,6 +3796,20 @@ public class TestVoltCompiler extends TestCase {
 
         success = compileFromDDL(compiler, testout_jar);
         assertFalse(success);
+    }
+
+    public void testDDLStmtProcNameWithDots() throws Exception
+    {
+        final File ddlFile = VoltProjectBuilder.writeStringToTempFile(StringUtils.join(new String[] {
+            "create table books (cash integer default 23 not null, title varchar(10) default 'foo', PRIMARY KEY(cash));",
+            "create procedure a.Foo as select * from books;"
+        }, "\n"));
+
+        final VoltCompiler compiler = new VoltCompiler();
+        assertFalse("Compile with dotted proc name should fail",
+                    compiler.compileFromDDL(testout_jar, ddlFile.getPath()));
+        assertTrue("Compile with dotted proc name did not have the expected error message",
+                   isFeedbackPresent("Invalid procedure name", compiler.m_errors));
     }
 
     private int countStringsMatching(List<String> diagnostics, String pattern) {
