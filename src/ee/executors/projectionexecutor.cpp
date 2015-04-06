@@ -72,10 +72,13 @@ bool ProjectionExecutor::p_init(AbstractPlanNode *abstractNode,
     m_columnCount = static_cast<int>(node->getOutputSchema().size());
 
     // initialize local variables
-    all_tuple_array_ptr = ExpressionUtil::convertIfAllTupleValues(node->getOutputColumnExpressions());
-    all_tuple_array = all_tuple_array_ptr.get();
     all_param_array_ptr = ExpressionUtil::convertIfAllParameterValues(node->getOutputColumnExpressions());
     all_param_array = all_param_array_ptr.get();
+    if (!node->isInline() && all_param_array == NULL) {
+        m_projector = OptimizedProjector(node->getOutputColumnExpressions());
+        m_projector.optimize(node->getOutputTable()->schema(),
+                             node->getInputTable()->schema());
+    }
 
     needs_substitute_ptr = boost::shared_array<bool>(new bool[m_columnCount]);
     needs_substitute = needs_substitute_ptr.get();
@@ -96,6 +99,8 @@ bool ProjectionExecutor::p_init(AbstractPlanNode *abstractNode,
     output_table = dynamic_cast<TempTable*>(node->getOutputTable()); //output table should be temptable
 
     if (!node->isInline()) {
+        // If the node is inlined, do we ever instantiate an executor?
+        // Is this dead code?
         Table* input_table = node->getInputTable();
         tuple = TableTuple(input_table->schema());
     }
@@ -122,7 +127,7 @@ bool ProjectionExecutor::p_execute(const NValueArray &params) {
     // execute
     //
     assert (m_columnCount == (int)node->getOutputColumnNames().size());
-    if (all_tuple_array == NULL && all_param_array == NULL) {
+    if (m_projector.numSteps() == 0 && all_param_array == NULL) {
         for (int ctr = m_columnCount - 1; ctr >= 0; --ctr) {
             assert(expression_array[ctr]);
             VOLT_TRACE("predicate[%d]: %s", ctr,
@@ -142,11 +147,8 @@ bool ProjectionExecutor::p_execute(const NValueArray &params) {
         // Project (or replace) values from input tuple
         //
         TableTuple &temp_tuple = output_table->tempTuple();
-        if (all_tuple_array != NULL) {
-            VOLT_TRACE("sweet, all tuples");
-            for (int ctr = m_columnCount - 1; ctr >= 0; --ctr) {
-                temp_tuple.setNValue(ctr, tuple.getNValue(all_tuple_array[ctr]));
-            }
+        if (m_projector.numSteps() > 0) {
+            m_projector.exec(temp_tuple, tuple);
         } else if (all_param_array != NULL) {
             VOLT_TRACE("sweet, all params");
             for (int ctr = m_columnCount - 1; ctr >= 0; --ctr) {

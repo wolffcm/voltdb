@@ -71,11 +71,6 @@ public:
 
     static AbstractExpression* loadExpressionFromJson(const std::string& jsonstring);
 
-    /** If the passed vector contains only TupleValueExpression, it
-     * returns ColumnIds of them, otherwise NULL.*/
-    static boost::shared_array<int>
-    convertIfAllTupleValues(const std::vector<voltdb::AbstractExpression*> &expressions);
-
     /** If the passed vector contains only ParameterValueExpression, it
      * returns ParamIds of them, otherwise NULL.*/
     static boost::shared_array<int>

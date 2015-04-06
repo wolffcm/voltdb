@@ -501,22 +501,6 @@ ExpressionUtil::expressionFactory(PlannerDomValue obj,
 }
 
 boost::shared_array<int>
-ExpressionUtil::convertIfAllTupleValues(const std::vector<voltdb::AbstractExpression*> &expressions)
-{
-    size_t cnt = expressions.size();
-    boost::shared_array<int> ret(new int[cnt]);
-    for (int i = 0; i < cnt; ++i) {
-        voltdb::TupleValueExpression* casted=
-          dynamic_cast<voltdb::TupleValueExpression*>(expressions[i]);
-        if (casted == NULL) {
-            return boost::shared_array<int>();
-        }
-        ret[i] = casted->getColumnId();
-    }
-    return ret;
-}
-
-boost::shared_array<int>
 ExpressionUtil::convertIfAllParameterValues(const std::vector<voltdb::AbstractExpression*> &expressions)
 {
     size_t cnt = expressions.size();

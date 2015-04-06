@@ -52,6 +52,7 @@
 #include "common/valuevector.h"
 #include "common/tabletuple.h"
 #include "executors/abstractexecutor.h"
+#include "executors/OptimizedProjector.hpp"
 
 namespace voltdb {
 
@@ -76,8 +77,7 @@ class ProjectionExecutor : public AbstractExecutor {
     private:
         TempTable* output_table;
         int m_columnCount;
-        boost::shared_array<int> all_tuple_array_ptr;
-        int* all_tuple_array;
+        OptimizedProjector m_projector;
         boost::shared_array<int> all_param_array_ptr;
         int* all_param_array;
         boost::shared_array<bool> needs_substitute_ptr;
