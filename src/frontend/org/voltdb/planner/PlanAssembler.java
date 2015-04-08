@@ -467,6 +467,9 @@ public class PlanAssembler {
 ////                return null;
 ////             }
 ////        }
+        if (retval != null && m_partitioning != null) {
+            retval.setStatementPartitioning(m_partitioning);
+        }
 
         return retval;
     }
