@@ -109,6 +109,7 @@ public class ParameterConverter {
     private static final Pattern thousandSeparator = Pattern.compile("\\,");
     /**
      * Given a string, covert it to a primitive type or return null.
+     * @param radix
      */
     private static Object convertStringToPrimitive(String value, final Class<?> expectedClz)
     throws VoltTypeException
@@ -120,20 +121,30 @@ public class ParameterConverter {
         value = thousandSeparator.matcher(value).replaceAll("");
 
         try {
-            if (expectedClz == long.class) {
-                return Long.parseLong(value);
-            }
-            if (expectedClz == int.class) {
-                return Integer.parseInt(value);
-            }
-            if (expectedClz == short.class) {
-                return Short.parseShort(value);
-            }
-            if (expectedClz == byte.class) {
-                return Byte.parseByte(value);
-            }
             if (expectedClz == double.class) {
                 return Double.parseDouble(value);
+            }
+            int radix = 10;
+            // A x'...' wrapper triggers hex decoding.
+            //TODO: support 0x prefix? other prefix/wrapper/radix values?
+            if (value.length() > 3 &&
+                    value.startsWith("x'") &&
+                    value.endsWith("'")) {
+                // Strip off the wrapper
+                value = value.substring(2, value.length()-1);
+                radix = 16;
+            }
+            if (expectedClz == long.class) {
+                return Long.parseLong(value, radix);
+            }
+            if (expectedClz == int.class) {
+                return Integer.parseInt(value, radix);
+            }
+            if (expectedClz == short.class) {
+                return Short.parseShort(value, radix);
+            }
+            if (expectedClz == byte.class) {
+                return Byte.parseByte(value, radix);
             }
         }
         // ignore the exception and fail through below
@@ -271,16 +282,26 @@ public class ParameterConverter {
             if ((Double) param == VoltType.NULL_FLOAT) return nullValueForType(expectedClz);
         }
         else if (inputClz == String.class) {
-            if (((String) param).equals(Constants.CSV_NULL)) return nullValueForType(expectedClz);
-            else if (expectedClz == String.class) return param;
+            String stringParam = (String) param;
+            if (stringParam.equals(Constants.CSV_NULL)) {
+                return nullValueForType(expectedClz);
+            }
+            if (expectedClz == String.class) {
+                return param;
+            }
             // Hack allows hex-encoded strings to be passed into byte[] params
-            else if (expectedClz == byte[].class) {
-                return Encoder.hexDecode((String) param);
+            if (expectedClz == byte[].class) {
+                if (stringParam.length() > 2 &&
+                        stringParam.startsWith("x'") &&
+                        stringParam.endsWith("'")) {
+                    stringParam = stringParam.substring(2, stringParam.length()-1);
+                }
+                return Encoder.hexDecode(stringParam);
             }
             // We allow all values to be passed as strings for csv loading, json, etc...
             // This code handles primitive types. Complex types come later.
             if (expectedClz.isPrimitive()) {
-                return convertStringToPrimitive((String) param, expectedClz);
+                return convertStringToPrimitive(stringParam, expectedClz);
             }
         }
         else if (inputClz == byte[].class) {

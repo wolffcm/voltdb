@@ -83,7 +83,7 @@ public class TestVarBinaryPartition extends TestCase {
             ClientResponse resp;
             resp = client.callProcedure("@AdHoc", "INSERT INTO BLAH VALUES ('22',1);");
             assertEquals(1, resp.getResults()[0].asScalarLong());
-            resp = client.callProcedure("@AdHoc", "INSERT INTO BLAH VALUES ('80',3);" );
+            resp = client.callProcedure("@AdHoc", "INSERT INTO BLAH VALUES (x'80',3);" );
             assertEquals(1, resp.getResults()[0].asScalarLong());
             resp = client.callProcedure("@AdHoc", "INSERT INTO BLAH VALUES ('8081828384858687888990',4);" );
             assertEquals(1, resp.getResults()[0].asScalarLong());

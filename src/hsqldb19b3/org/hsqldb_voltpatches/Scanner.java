@@ -43,7 +43,6 @@ import org.hsqldb_voltpatches.store.BitMap;
 import org.hsqldb_voltpatches.store.ValuePool;
 import org.hsqldb_voltpatches.types.BinaryData;
 import org.hsqldb_voltpatches.types.BinaryType;
-import org.hsqldb_voltpatches.types.BitType;
 import org.hsqldb_voltpatches.types.CharacterType;
 import org.hsqldb_voltpatches.types.DTIType;
 import org.hsqldb_voltpatches.types.DateTimeType;
@@ -1564,6 +1563,8 @@ public class Scanner {
                 }
                 break;
 
+            // A VoltDB extension -- disable broken handling for binary literals
+            /* disable 19 lines ...
             case 'b' :
             case 'B' :
                 if (charAt(currentPosition + 1) == '\'') {
@@ -1583,6 +1584,8 @@ public class Scanner {
                     return;
                 }
                 break;
+            ... disabled 19 lines */
+            // End of VoltDB extension
 
             case 'n' :
             case 'N' :
