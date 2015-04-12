@@ -21,6 +21,7 @@ import org.json_voltpatches.JSONException;
 import org.json_voltpatches.JSONObject;
 import org.json_voltpatches.JSONStringer;
 import org.voltdb.VoltType;
+import org.voltdb.parser.SQLParser;
 import org.voltdb.planner.PlanningErrorException;
 import org.voltdb.types.ExpressionType;
 import org.voltdb.types.TimestampType;
@@ -291,7 +292,7 @@ public class ConstantValueExpression extends AbstractValueExpression {
                 }
                 // It couldn't be converted to timestamp.
                 catch (IllegalArgumentException e) {
-                    throw new PlanningErrorException("Value (" + getValue() +
+                    throw new PlanningErrorException("Value (" + m_value +
                                                      ") has an invalid format for a constant " +
                                                      neededType.toSQLString() + " value");
 
@@ -306,9 +307,9 @@ public class ConstantValueExpression extends AbstractValueExpression {
             if (m_valueType == null ||
                     (m_valueType != VoltType.NUMERIC && ! m_valueType.isExactNumeric())) {
                 try {
-                    Double.parseDouble(getValue());
+                    Double.parseDouble(m_value);
                 } catch (NumberFormatException nfe) {
-                    throw new PlanningErrorException("Value (" + getValue() +
+                    throw new PlanningErrorException("Value (" + m_value +
                                                      ") has an invalid format for a constant " +
                                                      neededType.toSQLString() + " value");
                 }
@@ -319,22 +320,35 @@ public class ConstantValueExpression extends AbstractValueExpression {
         }
 
         if (neededType.isInteger()) {
-            long value = 0;
+            long longValue = 0;
+            int radix = 10;
+            String value = m_value;
             try {
-                value = Long.parseLong(getValue());
+                String hexDigits = SQLParser.getDigitsFromHexLiteral(value);
+                if (hexDigits != null) {
+                    longValue = SQLParser.hexDigitsToLong(hexDigits);
+                }
+                else {
+                    longValue = Long.parseLong(value, radix);
+                }
             } catch (NumberFormatException nfe) {
-                throw new PlanningErrorException("Value (" + getValue() +
+                throw new PlanningErrorException("Value (" + m_value +
                                                  ") has an invalid format for a constant " +
                                                  neededType.toSQLString() + " value");
             }
-            checkIntegerValueRange(value, neededType);
+            catch (SQLParser.Exception spe) {
+                throw new PlanningErrorException("Value (" + m_value +
+                        ") has an invalid format for a constant " +
+                        neededType.toSQLString() + " value");
+            }
+            checkIntegerValueRange(longValue, neededType);
             m_valueType = neededType;
             m_valueSize = neededType.getLengthInBytesForFixedTypes();
             return;
         }
 
         // That's it for known type conversions.
-        throw new PlanningErrorException("Value (" + getValue() +
+        throw new PlanningErrorException("Value (" + m_value +
                 ") has an invalid format for a constant " +
                 neededType.toSQLString() + " value");
     }
@@ -380,7 +394,7 @@ public class ConstantValueExpression extends AbstractValueExpression {
         }
         if (columnType.isInteger()) {
             try {
-                Long.parseLong(getValue());
+                Long.parseLong(m_value);
             } catch (NumberFormatException e) {
                 // DECIMAL is not OK, because the value may be bigger/smaller than our decimal range.
                 columnType = VoltType.FLOAT;
@@ -409,7 +423,7 @@ public class ConstantValueExpression extends AbstractValueExpression {
      * The value must end in a '%' and contain no other wildcards ('_' or '%').
      **/
     public boolean isPrefixPatternString() {
-        String patternString = getValue();
+        String patternString = m_value;
         int length = patternString.length();
         if (length == 0) {
             return false;

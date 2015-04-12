@@ -68,20 +68,16 @@ package org.hsqldb_voltpatches;
 
 // A VoltDB extension to transfer Expression structures to the VoltDB planner
 import java.lang.reflect.Field;
+/// We DO NOT reorganize imports in hsql code. And we try to keep these structured comment in place.
+import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Vector;
 
-/// We DO NOT reorganize imports in hsql code. And we try to keep these structured comment in place.
-import java.math.BigDecimal;
-import org.hsqldb_voltpatches.types.BinaryData;
-import org.hsqldb_voltpatches.types.TimestampData;
-import org.hsqldb_voltpatches.types.NumberType;
 import org.hsqldb_voltpatches.HSQLInterface.HSQLParseException;
 // End of VoltDB extension
-
 import org.hsqldb_voltpatches.HsqlNameManager.SimpleName;
 import org.hsqldb_voltpatches.ParserDQL.CompileContext;
 import org.hsqldb_voltpatches.lib.ArrayListIdentity;
@@ -91,8 +87,11 @@ import org.hsqldb_voltpatches.lib.OrderedHashSet;
 import org.hsqldb_voltpatches.lib.OrderedIntHashSet;
 import org.hsqldb_voltpatches.lib.Set;
 import org.hsqldb_voltpatches.persist.PersistentStore;
+import org.hsqldb_voltpatches.types.BinaryData;
 import org.hsqldb_voltpatches.types.CharacterType;
 import org.hsqldb_voltpatches.types.NullType;
+import org.hsqldb_voltpatches.types.NumberType;
+import org.hsqldb_voltpatches.types.TimestampData;
 import org.hsqldb_voltpatches.types.Type;
 
 /**

@@ -129,12 +129,23 @@ public class TestBlobType extends TestCase {
             assertEquals(1, cr.getResults()[0].getRowCount());
             assertEquals(1, cr.getResults()[0].asScalarLong());
 
-            // adhoc queries
+            // adhoc writes
             cr = client.callProcedure("@AdHoc", "update blah set b = 'Bb01' where ival = 5");
             assertTrue(cr.getStatus() == ClientResponse.SUCCESS);
             assertEquals(1, cr.getResults()[0].getRowCount());
             assertEquals(1, cr.getResults()[0].asScalarLong());
+            // try again with explicit x prefix
+            cr = client.callProcedure("@AdHoc", "update blah set b = x'Bb02' where ival = 5");
+            assertTrue(cr.getStatus() == ClientResponse.SUCCESS);
+            assertEquals(1, cr.getResults()[0].getRowCount());
+            assertEquals(1, cr.getResults()[0].asScalarLong());
+
             cr = client.callProcedure("@AdHoc", "insert into blah values (12, 'aabbcc', 'hi', 'aabb');");
+            assertTrue(cr.getStatus() == ClientResponse.SUCCESS);
+            assertEquals(1, cr.getResults()[0].getRowCount());
+            assertEquals(1, cr.getResults()[0].asScalarLong());
+            // try again with explicit X prefix
+            cr = client.callProcedure("@AdHoc", "insert into blah values (14, X'012345', 'hi', X'6789');");
             assertTrue(cr.getStatus() == ClientResponse.SUCCESS);
             assertEquals(1, cr.getResults()[0].getRowCount());
             assertEquals(1, cr.getResults()[0].asScalarLong());

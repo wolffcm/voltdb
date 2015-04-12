@@ -32,6 +32,7 @@
 package org.hsqldb_voltpatches;
 
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.Locale;
 
 import org.hsqldb_voltpatches.lib.ArrayUtil;
@@ -43,7 +44,6 @@ import org.hsqldb_voltpatches.store.BitMap;
 import org.hsqldb_voltpatches.store.ValuePool;
 import org.hsqldb_voltpatches.types.BinaryData;
 import org.hsqldb_voltpatches.types.BinaryType;
-import org.hsqldb_voltpatches.types.BitType;
 import org.hsqldb_voltpatches.types.CharacterType;
 import org.hsqldb_voltpatches.types.DTIType;
 import org.hsqldb_voltpatches.types.DateTimeType;
@@ -1560,10 +1560,35 @@ public class Scanner {
                         ((BinaryData) token.tokenValue).length(null));
                     token.tokenType = Tokens.X_VALUE;
 
+                    // A VoltDB extension to make x'abcd' literals look like integers
+                    token.dataType = Type.SQL_BIGINT;
+                    byte[] data = ((BinaryData)(token.tokenValue)).getBytes();
+                    if (data.length == 0 || data.length > 8) {
+                        token.tokenType   = Tokens.X_MALFORMED_NUMERIC;
+                        token.isMalformed = true;
+                    }
+                    else {
+                        // pad with
+                        byte[] dataWithLeadingZeros = new byte[8];
+                        int lenDiff = 8 - data.length;
+                        for (int i = 0; i < 8; ++i) {
+                            byte b = 0;
+                            if (i - lenDiff >= 0) {
+                                b = data[i - lenDiff];
+                            }
+                            dataWithLeadingZeros[i] = b;
+                        }
+                        BigInteger bi = new BigInteger(dataWithLeadingZeros);
+                        token.tokenValue = ValuePool.getLong(bi.longValue());
+                    }
+                    // End of VoltDB extension
+
                     return;
                 }
                 break;
 
+            // A VoltDB extension -- disable broken handling for binary literals
+            /* disable 19 lines ...
             case 'b' :
             case 'B' :
                 if (charAt(currentPosition + 1) == '\'') {
@@ -1583,6 +1608,8 @@ public class Scanner {
                     return;
                 }
                 break;
+            ... disabled 19 lines */
+            // End of VoltDB extension
 
             case 'n' :
             case 'N' :

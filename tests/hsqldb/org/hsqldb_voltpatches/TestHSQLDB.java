@@ -272,7 +272,9 @@ public class TestHSQLDB extends TestCase {
         HSQLInterface hsql = setupTPCCDDL();
         assertNotNull(hsql);
 
-        String sql = "INSERT INTO new_order (NO_O_ID, NO_D_ID, NO_W_ID) SELECT O_ID, O_D_ID+1, CAST(? AS INTEGER) FROM ORDERS;";
+        String sql = "INSERT INTO new_order (NO_O_ID, NO_D_ID, NO_W_ID) SELECT x'100110011001100A'," +
+        " O_D_ID+1, CAST(? AS INTEGER) FROM ORDERS;";
+        //String sql = "INSERT INTO new_order (NO_O_ID, NO_D_ID, NO_W_ID) SELECT O_ID, O_D_ID+1, CAST(? AS INTEGER) FROM ORDERS;";
         VoltXMLElement xml = null;
         try {
             xml = hsql.getXMLCompiledStatement(sql);
