@@ -249,6 +249,7 @@ CTX.INPUT['executors'] = """
  receiveexecutor.cpp
  sendexecutor.cpp
  seqscanexecutor.cpp
+ tuplescanexecutor.cpp
  unionexecutor.cpp
  updateexecutor.cpp
 """
@@ -259,7 +260,11 @@ CTX.INPUT['expressions'] = """
  vectorexpression.cpp
  functionexpression.cpp
  tupleaddressexpression.cpp
+ operatorexpression.cpp
  parametervalueexpression.cpp
+ subqueryexpression.cpp
+ scalarvalueexpression.cpp
+ vectorcomparisonexpression.cpp
 """
 
 CTX.INPUT['plannodes'] = """
@@ -286,6 +291,7 @@ CTX.INPUT['plannodes'] = """
  SchemaColumn.cpp
  sendnode.cpp
  seqscannode.cpp
+ tuplescannode.cpp
  unionnode.cpp
  updatenode.cpp
 """
@@ -403,6 +409,7 @@ if whichtests in ("${eetestsuite}", "execution"):
 if whichtests in ("${eetestsuite}", "expressions"):
     CTX.TESTS['expressions'] = """
      expression_test
+     function_test
     """
 
 if whichtests in ("${eetestsuite}", "indexes"):
@@ -430,6 +437,7 @@ if whichtests in ("${eetestsuite}", "storage"):
      TempTableLimitsTest
      ExportTupleStream_test
      DRTupleStream_test
+     DRBinaryLog_test
     """
 
 if whichtests in ("${eetestsuite}", "structures"):

@@ -43,7 +43,6 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include <iostream>
 #include "seqscanexecutor.h"
 #include "common/debuglog.h"
 #include "common/common.h"
@@ -188,7 +187,7 @@ bool SeqScanExecutor::p_execute(const NValueArray &params) {
 
         if (predicate)
         {
-            VOLT_TRACE("SCAN PREDICATE A:\n%s\n", predicate->debug(true).c_str());
+            VOLT_TRACE("SCAN PREDICATE :\n%s\n", predicate->debug(true).c_str());
         }
 
         int limit = -1;
@@ -220,6 +219,7 @@ bool SeqScanExecutor::p_execute(const NValueArray &params) {
                        tuple.debug(input_table->name()).c_str(), tuple_ctr,
                        (int)input_table->activeTupleCount());
             pmp.countdownProgress();
+
             //
             // For each tuple we need to evaluate it against our predicate
             //
@@ -285,7 +285,6 @@ bool SeqScanExecutor::p_execute(const NValueArray &params) {
         if (m_aggExec != NULL) {
             m_aggExec->p_execute_finish();
         }
-
     }
     //* for debug */std::cout << "SeqScanExecutor: node id " << node->getPlanNodeId() <<
     //* for debug */    " output table " << (void*)output_table <<

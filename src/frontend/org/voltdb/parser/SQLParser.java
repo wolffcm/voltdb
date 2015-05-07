@@ -22,6 +22,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.StringReader;
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -344,9 +345,11 @@ public class SQLParser extends SQLPatternFactory
             "'" +
             "[^',\\s]*" +  // arbitrary string content NOT matching param separators
             "[,\\s]" +     // the first match for a param separator
-            "[^']" +       // arbitrary string content
+            "[^']*" +      // arbitrary string content
             "'",           // end of string OR start of escaped quote
             Pattern.MULTILINE);
+
+    private static final Pattern SingleQuotedHexLiteral = Pattern.compile("[Xx]'([0-9A-Fa-f]*)'", Pattern.MULTILINE);
 
     // Define a common pattern to sweep up a mix of semicolons and space and
     // meaningless garbage at the end of the simpler sqlcmd directives.
@@ -364,6 +367,9 @@ public class SQLParser extends SQLPatternFactory
             "^\\s*" +         // optional indent at start of line
             "help" +          // required HELP command token
             "(\\W|$)" +       // require an end to the keyword OR EOL (group 1)
+            // Make everything that follows optional so that help
+            // command diagnostics can "own" any line starting with the word
+            // help.
             "\\s*" +          // optional whitespace before subcommand
             "([^;\\s]*)" +    // optional subcommand (group 2)
             InitiallyForgivingDirectiveTermination,
@@ -394,6 +400,8 @@ public class SQLParser extends SQLPatternFactory
             "(\\W|$)" +    // require an end to the keyword OR EOL (group 1)
             // Make everything that follows optional so that recall command
             // diagnostics can "own" any line starting with the word recall.
+            "\\s*" +          // extra spaces
+            "([^;\\s]*)" + // (first) non-space non-semicolon garbage word (group 2)
             InitiallyForgivingDirectiveTermination,
             Pattern.CASE_INSENSITIVE);
 
@@ -914,21 +922,41 @@ public class SQLParser extends SQLPatternFactory
     private static List<String> parseExecParameters(String paramText)
     {
         final String SafeParamStringValuePattern = "#(SQL_PARSER_SAFE_PARAMSTRING)";
-        paramText = paramText.trim();
+        // Find all quoted strings.
         // Mask out strings that contain whitespace or commas
         // that must not be confused with parameter separators.
+        // "Safe" strings that don't contain these characters don't need to be masked
+        // but they DO need to be found and explicitly skipped so that their closing
+        // quotes don't trigger a false positive for the START of an unsafe string.
+        // Skipping is accomplished by resetting paramText to an offset substring
+        // after copying the skipped (or substituted) text to a string builder.
         ArrayList<String> originalString = new ArrayList<String>();
-        Matcher stringMatcher = SingleQuotedStringContainingParameterSeparators.matcher(paramText);
+        Matcher stringMatcher = SingleQuotedString.matcher(paramText);
+        StringBuilder safeText = new StringBuilder();
         while (stringMatcher.find()) {
-            originalString.add(stringMatcher.group());
-            paramText = stringMatcher.replaceFirst(SafeParamStringValuePattern);
-            stringMatcher = SingleQuotedStringContainingParameterSeparators.matcher(paramText);
+            // Save anything before the found string.
+            safeText.append(paramText.substring(0, stringMatcher.start()));
+            String asMatched = stringMatcher.group();
+            if (SingleQuotedStringContainingParameterSeparators.matcher(asMatched).matches()) {
+                // The matched string is unsafe, provide cover for it in safeText.
+                originalString.add(asMatched);
+                safeText.append(SafeParamStringValuePattern);
+            } else {
+                // The matched string is safe. Add it to safeText.
+                safeText.append(asMatched);
+            }
+            paramText = paramText.substring(stringMatcher.end());
+            stringMatcher = SingleQuotedString.matcher(paramText);
         }
+        // Save anything after the last found string.
+        safeText.append(paramText);
+
         ArrayList<String> params = new ArrayList<String>();
         int subCount = 0;
         int neededSubs = originalString.size();
         // Split the params at the separators
-        for (String fragment : paramText.split("[\\s,]+")) {
+        String[] split = safeText.toString().split("[\\s,]+");
+        for (String fragment : split) {
             if (fragment.isEmpty()) {
                 continue; // ignore effects of leading or trailing separators
             }
@@ -1220,6 +1248,10 @@ public class SQLParser extends SQLPatternFactory
             throw new SQLParser.Exception(msg);
         }
 
+        if (filename.startsWith("~")) {
+            filename = filename.replaceFirst("~", System.getProperty("user.home"));
+        }
+
         return new FileInfo(parentContext, option, filename);
     }
     /**
@@ -1313,6 +1345,47 @@ public class SQLParser extends SQLPatternFactory
     }
 
     /**
+     * Given a parameter string, if it's of the form x'0123456789ABCDEF',
+     * return a string containing just the digits.  Otherwise, return null.
+     */
+    public static String getDigitsFromHexLiteral(String paramString) {
+        Matcher matcher = SingleQuotedHexLiteral.matcher(paramString);
+        if (matcher.matches()) {
+            return matcher.group(1);
+        }
+        return null;
+    }
+
+    /**
+     * Given a string of hex digits, produce a long value, assuming
+     * a 2's complement representation.
+     */
+    public static long hexDigitsToLong(String hexDigits) throws SQLParser.Exception {
+
+        // BigInteger.longValue() will truncate to the lowest 64 bits,
+        // so we need to explicitly check if there's too many digits.
+        if (hexDigits.length() > 16) {
+            throw new SQLParser.Exception("Too many hexadecimal digits for BIGINT value");
+        }
+
+        if (hexDigits.length() == 0) {
+            throw new SQLParser.Exception("Zero hexadecimal digits is invalid for BIGINT value");
+        }
+
+        // The method
+        //   Long.parseLong(<digits>, <radix>);
+        // Doesn't quite do what we want---it expects a '-' to
+        // indicate negative values, and doesn't want the sign bit set
+        // in the hex digits.
+        //
+        // Once we support Java 1.8, we can use Long.parseUnsignedLong(<digits>, 16)
+        // instead.
+
+        long val = new BigInteger(hexDigits, 16).longValue();
+        return val;
+    }
+
+    /**
      * Results returned by parseExecuteCall()
      */
     public static class ExecuteCallResults
@@ -1382,7 +1455,16 @@ public class SQLParser extends SQLPatternFactory
                             objParam = Integer.parseInt(param);
                         }
                         else if (paramType.equals("bigint")) {
-                            objParam = Long.parseLong(param);
+                            // Could be literal of the form x'0007'
+                            // or just a simple decimal literal
+                            String hexDigits = getDigitsFromHexLiteral(param);
+                            if (hexDigits != null) {
+                                objParam = hexDigitsToLong(hexDigits);
+                            }
+                            else {
+                                // It's a decimal literal
+                                objParam = Long.parseLong(param);
+                            }
                         }
                         else if (paramType.equals("float")) {
                             objParam = Double.parseDouble(param);
@@ -1397,15 +1479,15 @@ public class SQLParser extends SQLPatternFactory
                             objParam = parseDate(param);
                         }
                         else if (paramType.equals("varbinary") || paramType.equals("tinyint_array")) {
-                            String val = Unquote.matcher(param).replaceAll("");
-                            objParam = Encoder.hexDecode(val);
-                            // Make sure we have an even number of characters, otherwise it is an invalid byte string
-                            if (param.length() % 2 == 1) {
-                                throw new SQLParser.Exception(
-                                        "Invalid varbinary value (%s) (param %d) : "
-                                        + "must have an even number of hex characters to be valid.",
-                                        param, i+1);
+                            // A VARBINARY literal may or may not be
+                            // prefixed with an X.
+                            String hexDigits = getDigitsFromHexLiteral(param);
+                            if (hexDigits == null) {
+                                hexDigits = Unquote.matcher(param).replaceAll("");
                             }
+                            // The following call with throw an exception if we
+                            // have an odd number of hex digits.
+                            objParam = Encoder.hexDecode(hexDigits);
                         }
                         else {
                             throw new SQLParser.Exception("Unsupported Data Type: %s", paramType);
@@ -1424,6 +1506,14 @@ public class SQLParser extends SQLPatternFactory
         // No public constructor.
         ExecuteCallResults()
         {}
+
+        @Override
+        public String toString() {
+            return "ExecuteCallResults { "
+                            + "procedure: " + procedure + ", "
+                            + "params: " + params + ", "
+                            + "paramTypes: " + paramTypes + " }";
+        }
     }
 
     /**
@@ -1443,6 +1533,7 @@ public class SQLParser extends SQLPatternFactory
 
     /**
      * Parse EXECUTE procedure call for testing without looking up parameter types.
+     * Used for testing.
      * @param statement   statement to parse
      * @param procedures  maps procedures to parameter signature maps
      * @return            results object or NULL if statement wasn't recognized
@@ -1476,7 +1567,8 @@ public class SQLParser extends SQLPatternFactory
                 // even near the start
                 commandWordTerminator.equals(",")) {
         ExecuteCallResults results = new ExecuteCallResults();
-        results.params = parseExecParameters(statement.substring(matcher.end()));
+        String rawParams = statement.substring(matcher.end());
+        results.params = parseExecParameters(rawParams);
         results.procedure = results.params.remove(0);
         // TestSqlCmdInterface passes procedures==null because it
         // doesn't need/want the param types.

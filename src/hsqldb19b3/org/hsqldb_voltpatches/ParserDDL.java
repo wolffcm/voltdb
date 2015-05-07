@@ -3160,11 +3160,18 @@ public class ParserDDL extends ParserRoutine {
             indexExprs = null;
         }
 
+        // A VoltDB extension to support partial index
+        Expression predicate = null;
+        if (readIfThis(Tokens.WHERE)) {
+            predicate = XreadBooleanValueExpression();
+        }
+
         indexColumns = getColumnList(set, table);
         String   sql          = getLastPart();
         Object[] args         = new Object[] {
             table, indexColumns, indexHsqlName, Boolean.valueOf(unique), indexExprs,
-            Boolean.valueOf(assumeUnique)
+            Boolean.valueOf(assumeUnique),
+            predicate
         /* disable 4 lines ...
         int[]    indexColumns = readColumnList(table, true);
         String   sql          = getLastPart();
@@ -5079,7 +5086,9 @@ public class ParserDDL extends ParserRoutine {
             // LIMIT PARTITION ROWS 10 EXECUTE (DELETE FROM tbl WHERE b = 1)
             //
             readThis(Tokens.OPENBRACKET);
-            int position = getPosition();
+
+            startRecording();
+
             int numOpenBrackets = 1;
             while (numOpenBrackets > 0) {
                 switch(token.tokenType) {
@@ -5104,8 +5113,10 @@ public class ParserDDL extends ParserRoutine {
                 }
             }
 
+            Token[] stmtTokens = getRecordedStatement();
+
             // This captures the DELETE statement exactly, including embedded whitespace, etc.
-            c.rowsLimitDeleteStmt = getLastPart(position);
+            c.rowsLimitDeleteStmt = Token.getSQL(stmtTokens);
             readThis(Tokens.CLOSEBRACKET);
         }
     }

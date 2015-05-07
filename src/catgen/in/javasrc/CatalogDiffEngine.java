@@ -31,15 +31,8 @@ import java.util.TreeSet;
 
 import org.apache.commons.lang3.StringUtils;
 import org.voltdb.VoltType;
-import org.voltdb.catalog.CatalogType;
-import org.voltdb.catalog.Cluster;
-import org.voltdb.catalog.ConnectorProperty;
-import org.voltdb.catalog.ConnectorTableInfo;
 import org.voltdb.catalog.CatalogChangeGroup.FieldChange;
 import org.voltdb.catalog.CatalogChangeGroup.TypeChanges;
-import org.voltdb.catalog.Column;
-import org.voltdb.catalog.Connector;
-import org.voltdb.catalog.Table;
 import org.voltdb.expressions.AbstractExpression;
 import org.voltdb.utils.CatalogSizing;
 import org.voltdb.utils.CatalogUtil;
@@ -197,6 +190,17 @@ public class CatalogDiffEngine {
             return false;
         }
 
+        // partial indexes must have identical predicates
+        if (existingIndex.getPredicatejson().length() > 0) {
+            if (existingIndex.getPredicatejson().equals(newIndex.getPredicatejson())) {
+                return true;
+            } else {
+                return false;
+            }
+        } else if (newIndex.getPredicatejson().length() > 0) {
+            return false;
+        }
+
         // iterate over all of the existing columns
         for (ColumnRef existingColRef : existingIndex.getColumns()) {
             boolean foundMatch = false;
@@ -308,7 +312,7 @@ public class CatalogDiffEngine {
      *   LIMIT PARTITION ROWS <n> EXECUTE (DELETE ...)
      * constraint.
      */
-    static private boolean isTableLimitDeleteStmt(final CatalogType catType) {
+    static protected boolean isTableLimitDeleteStmt(final CatalogType catType) {
         if (catType instanceof Statement && catType.getParent() instanceof Table)
             return true;
         return false;
@@ -337,7 +341,7 @@ public class CatalogDiffEngine {
      * a non-empty table. There will be a subsequent check for empty table
      * feasability.
      */
-    private String checkAddDropWhitelist(final CatalogType suspect, final ChangeType changeType)
+    protected String checkAddDropWhitelist(final CatalogType suspect, final ChangeType changeType)
     {
         //Will catch several things that are actually just deployment changes, but don't care
         //to be more specific at this point
@@ -426,6 +430,9 @@ public class CatalogDiffEngine {
             if (CatalogUtil.isTableExportOnly((Database)table.getParent(), table)) {
                 return "May not dynamically add, drop, or rename export table columns.";
             }
+            if (table.getIsdred()) {
+                return "May not dynamically add, drop, or rename DR table columns.";
+            }
             if (changeType == ChangeType.ADDITION) {
                 Column col = (Column) suspect;
                 if ((! col.getNullable()) && (col.getDefaultvalue() == null)) {
@@ -499,7 +506,7 @@ public class CatalogDiffEngine {
      * String 1 is name of a table if the change could be made if the table of that name had no tuples.
      * String 2 is the error message to show the user if that table isn't empty.
      */
-    private String[] checkAddDropIfTableIsEmptyWhitelist(final CatalogType suspect, final ChangeType changeType) {
+    protected String[] checkAddDropIfTableIsEmptyWhitelist(final CatalogType suspect, final ChangeType changeType) {
         String[] retval = new String[2];
 
         // handle adding an index - presumably unique
@@ -534,6 +541,9 @@ public class CatalogDiffEngine {
             Column column = (Column)suspect;
             Table table = (Table)column.getParent();
             if (CatalogUtil.isTableExportOnly((Database)table.getParent(), table)) {
+                return null;
+            }
+            if (table.getIsdred()) {
                 return null;
             }
             retval[0] = parent.getTypeName();
@@ -586,7 +596,7 @@ public class CatalogDiffEngine {
      * can be given if it turns out we really can't make the change.
      * Return "" if the error has already been handled.
      */
-    private String checkModifyWhitelist(final CatalogType suspect,
+    protected String checkModifyWhitelist(final CatalogType suspect,
                                         final CatalogType prevType,
                                         final String field)
     {
@@ -633,19 +643,10 @@ public class CatalogDiffEngine {
         // cases of BEFORE and AFTER values by listing the offending values.
         String restrictionQualifier = "";
 
-        if (suspect instanceof Cluster && field.equals("drClusterId") ||
-                suspect instanceof Cluster && field.equals("drProducerPort")) {
+        if (suspect instanceof Cluster && field.equals("drProducerPort")) {
             // Don't allow changes to ClusterId or ProducerPort while not transitioning to or from Disabled
             if ((Boolean)prevType.getField("drProducerEnabled") && (Boolean)suspect.getField("drProducerEnabled")) {
                 restrictionQualifier = " while DR is enabled";
-            }
-            else {
-                return null;
-            }
-        }
-        if (suspect instanceof Cluster && field.equals("drMasterHost")) {
-            if ((Boolean)suspect.getField("drProducerEnabled")) {
-                restrictionQualifier = " active-active and daisy-chained DR unsupported";
             }
             else {
                 return null;
@@ -681,6 +682,9 @@ public class CatalogDiffEngine {
             Table table = (Table) parent;
             if (CatalogUtil.isTableExportOnly((Database)table.getParent(), table)) {
                 return "May not dynamically change the columns of export tables.";
+            }
+            if (table.getIsdred()) {
+                return "May not dynamically modify DR table columns.";
             }
 
             if (field.equals("index")) {
@@ -851,6 +855,9 @@ public class CatalogDiffEngine {
 
             // for now, no changes to export tables
             if (CatalogUtil.isTableExportOnly(db, table)) {
+                return null;
+            }
+            if (table.getIsdred()) {
                 return null;
             }
 

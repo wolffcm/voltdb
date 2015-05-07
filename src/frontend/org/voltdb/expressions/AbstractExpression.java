@@ -591,6 +591,12 @@ public abstract class AbstractExpression implements JSONString, Cloneable {
         return result;
     }
 
+    public static AbstractExpression fromJSONString(String jsontext, StmtTableScan tableScan) throws JSONException
+    {
+        JSONObject jobject = new JSONObject(jsontext);
+        return fromJSONObject(jobject, tableScan);
+    }
+
     /**
      * For TVEs, it is only serialized column index and table index. In order to match expression,
      * there needs more information to revert back the table name, table alisa and column name.
@@ -637,8 +643,11 @@ public abstract class AbstractExpression implements JSONString, Cloneable {
             ParsedColInfo col = indexToColumnMap.get(ii);
             TupleValueExpression tve = new TupleValueExpression(
                     col.tableName, col.tableAlias, col.columnName, col.alias, ii);
-            tve.setTypeSizeBytes(getValueType(), getValueSize(), getInBytes());
 
+            tve.setTypeSizeBytes(getValueType(), getValueSize(), getInBytes());
+            if (this instanceof TupleValueExpression) {
+                tve.setOrigStmtId(((TupleValueExpression)this).getOrigStmtId());
+            }
             // To prevent pushdown of LIMIT when ORDER BY references an agg. ENG-3487.
             if (hasAnySubexpressionOfClass(AggregateExpression.class))
                 tve.setHasAggregate(true);

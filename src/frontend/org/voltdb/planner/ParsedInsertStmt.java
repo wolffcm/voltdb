@@ -33,6 +33,7 @@ import org.voltdb.expressions.AbstractExpression;
 import org.voltdb.expressions.ConstantValueExpression;
 import org.voltdb.expressions.FunctionExpression;
 import org.voltdb.planner.parseinfo.StmtSubqueryScan;
+import org.voltdb.utils.CatalogUtil;
 
 /**
  *
@@ -71,7 +72,10 @@ public class ParsedInsertStmt extends AbstractParsedStmt {
         assert(m_tableList.isEmpty());
 
         String tableName = stmtNode.attributes.get("table");
+        // Need to add the table to the cache. It may be required to resolve the
+        // correlated TVE in case of WHERE clause contains IN subquery
         Table table = getTableFromDB(tableName);
+        addTableToStmtCache(table, tableName);
 
         m_tableList.add(table);
 
@@ -178,19 +182,14 @@ public class ParsedInsertStmt extends AbstractParsedStmt {
         return expr;
     }
 
-    public boolean isInsertWithSubquery() {
-        if (m_subquery != null) {
-            return true;
-        }
-        return false;
-    }
+    public StmtSubqueryScan getSubqueryScan() { return m_subquery; }
 
     /**
      * Return the subqueries for this statement.  For INSERT statements,
      * there can be only one.
      */
     @Override
-    public List<StmtSubqueryScan> getSubqueries() {
+    public List<StmtSubqueryScan> getSubqueryScans() {
         List<StmtSubqueryScan> subqueries = new ArrayList<>();
 
         if (m_subquery != null) {
@@ -222,9 +221,6 @@ public class ParsedInsertStmt extends AbstractParsedStmt {
      */
     public boolean targetTableHasLimitRowsTrigger() {
         assert(m_tableList.size() == 1);
-        CatalogMap<Statement> stmtMap = m_tableList.get(0).getTuplelimitdeletestmt();
-        if (stmtMap != null && stmtMap.size() > 0)
-            return true;
-        return false;
+        return CatalogUtil.getLimitPartitionRowsDeleteStmt(m_tableList.get(0)) != null;
     }
 }

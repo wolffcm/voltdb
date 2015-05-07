@@ -53,7 +53,9 @@ static int64_t addPartitionId(int64_t value) {
 class TableAndIndexTest : public Test {
     public:
         TableAndIndexTest() {
-            engine = new ExecutorContext(0, 0, NULL, &topend, &pool, NULL, "", 0, &drStream, &drReplicatedStream);
+            NValueArray* noParams = NULL;
+            VoltDBEngine* noEngine = NULL;
+            engine = new ExecutorContext(0, 0, NULL, &topend, &pool, noParams, noEngine, "", 0, &drStream, &drReplicatedStream);
             mem = 0;
             *reinterpret_cast<int64_t*>(signature) = 42;
             drStream.configure(44);
@@ -192,8 +194,10 @@ class TableAndIndexTest : public Test {
             // add other indexes
             BOOST_FOREACH(TableIndexScheme &scheme, districtIndexes) {
                 TableIndex *index = TableIndexFactory::getInstance(scheme);
+                TableIndex *replicaIndex = TableIndexFactory::getInstance(scheme);
                 assert(index);
                 districtTable->addIndex(index);
+                districtTableReplica->addIndex(replicaIndex);
             }
 
             districtTempTable = dynamic_cast<TempTable*>(
@@ -228,8 +232,10 @@ class TableAndIndexTest : public Test {
             // add other indexes
             BOOST_FOREACH(TableIndexScheme &scheme, customerIndexes) {
                 TableIndex *index = TableIndexFactory::getInstance(scheme);
+                TableIndex *replicaIndex = TableIndexFactory::getInstance(scheme);
                 assert(index);
                 customerTable->addIndex(index);
+                customerTableReplica->addIndex(replicaIndex);
             }
 
             customerTempTable =  dynamic_cast<TempTable*>(
@@ -350,6 +356,7 @@ TEST_F(TableAndIndexTest, DrTest) {
     districtTable->insertTuple(temp_tuple);
 
     //Flush to generate a buffer
+    drStream.endTransaction();
     drStream.periodicFlush(-1, addPartitionId(99));
     ASSERT_TRUE( topend.receivedDRBuffer );
 
@@ -396,6 +403,7 @@ TEST_F(TableAndIndexTest, DrTest) {
     districtTable->updateTuple( toUpdate, temp_tuple);
 
     //Flush to generate the log buffer
+    drStream.endTransaction();
     drStream.periodicFlush(-1, addPartitionId(101));
     ASSERT_TRUE( topend.receivedDRBuffer );
 
@@ -431,6 +439,7 @@ TEST_F(TableAndIndexTest, DrTest) {
     districtTable->deleteTuple( toDelete, true);
 
     //Flush to generate the buffer
+    drStream.endTransaction();
     drStream.periodicFlush(-1, addPartitionId(102));
     EXPECT_TRUE( topend.receivedDRBuffer );
 
@@ -489,6 +498,7 @@ TEST_F(TableAndIndexTest, DrTestNoPK) {
     districtTable->insertTuple(temp_tuple);
 
     //Flush to generate a buffer
+    drStream.endTransaction();
     drStream.periodicFlush(-1, addPartitionId(99));
     ASSERT_TRUE( topend.receivedDRBuffer );
 
@@ -531,6 +541,7 @@ TEST_F(TableAndIndexTest, DrTestNoPK) {
     districtTable->deleteTuple(toDelete, true);
 
     //Flush to generate the buffer
+    drStream.endTransaction();
     drStream.periodicFlush(-1, addPartitionId(101));
     EXPECT_TRUE( topend.receivedDRBuffer );
 
@@ -604,6 +615,7 @@ TEST_F(TableAndIndexTest, DrTestNoPKUninlinedColumn) {
     customerTable->insertTuple(temp_tuple);
 
     //Flush to generate a buffer
+    drStream.endTransaction();
     drStream.periodicFlush(-1, addPartitionId(99));
     ASSERT_TRUE( topend.receivedDRBuffer );
 
@@ -646,6 +658,7 @@ TEST_F(TableAndIndexTest, DrTestNoPKUninlinedColumn) {
     customerTable->deleteTuple(toDelete, true);
 
     //Flush to generate the buffer
+    drStream.endTransaction();
     drStream.periodicFlush(-1, addPartitionId(101));
     EXPECT_TRUE( topend.receivedDRBuffer );
 

@@ -82,6 +82,7 @@ import org.json_voltpatches.JSONObject;
 import org.voltcore.utils.CoreUtils;
 import org.voltdb.VoltDB.Configuration;
 import org.voltdb.client.Client;
+import org.voltdb.client.ClientAuthHashScheme;
 import org.voltdb.client.ClientConfig;
 import org.voltdb.client.ClientFactory;
 import org.voltdb.client.ClientResponse;
@@ -289,12 +290,12 @@ public class TestJSONInterface extends TestCase {
         return response;
     }
 
-    public static String getHashedPasswordForHTTPVar(String password) {
+    public static String getHashedPasswordForHTTPVar(String password, ClientAuthHashScheme scheme) {
         assert (password != null);
 
         MessageDigest md = null;
         try {
-            md = MessageDigest.getInstance("SHA-1");
+            md = MessageDigest.getInstance(ClientAuthHashScheme.getDigestScheme(scheme));
         } catch (NoSuchAlgorithmException e) {
             fail();
         }
@@ -306,19 +307,19 @@ public class TestJSONInterface extends TestCase {
         }
 
         String retval = Encoder.hexEncode(hashedPassword);
-        assertEquals(40, retval.length());
+        assertEquals(ClientAuthHashScheme.getHexencodedDigestLength(scheme), retval.length());
         return retval;
     }
 
     public static String callProcOverJSON(String procName, ParameterSet pset, String username, String password, boolean preHash) throws Exception {
-        return callProcOverJSON(procName, pset, username, password, preHash, false, 200 /* HTTP_OK */);
+        return callProcOverJSON(procName, pset, username, password, preHash, false, 200 /* HTTP_OK */, ClientAuthHashScheme.HASH_SHA256);
     }
 
     public static String callProcOverJSON(String procName, ParameterSet pset, String username, String password, boolean preHash, boolean admin) throws Exception {
-        return callProcOverJSON(procName, pset, username, password, preHash, admin, 200 /* HTTP_OK */);
+        return callProcOverJSON(procName, pset, username, password, preHash, admin, 200 /* HTTP_OK */, ClientAuthHashScheme.HASH_SHA256);
     }
 
-    public static String callProcOverJSON(String procName, ParameterSet pset, String username, String password, boolean preHash, boolean admin, int expectedCode) throws Exception {
+    public static String callProcOverJSON(String procName, ParameterSet pset, String username, String password, boolean preHash, boolean admin, int expectedCode, ClientAuthHashScheme scheme) throws Exception {
         // Call insert
         String paramsInJSON = pset.toJSONString();
         //System.out.println(paramsInJSON);
@@ -330,7 +331,7 @@ public class TestJSONInterface extends TestCase {
         }
         if (password != null) {
             if (preHash) {
-                params.put("Hashedpassword", getHashedPasswordForHTTPVar(password));
+                params.put("Hashedpassword", getHashedPasswordForHTTPVar(password, scheme));
             } else {
                 params.put("Password", password);
             }
@@ -343,7 +344,16 @@ public class TestJSONInterface extends TestCase {
 
         varString = getHTTPVarString(params);
 
-        return callProcOverJSONRaw(varString, expectedCode);
+        String ret = callProcOverJSONRaw(varString, expectedCode);
+        if (preHash) {
+            //If prehash make same call with SHA1 to check expected code.
+            params.put("Hashedpassword", getHashedPasswordForHTTPVar(password, ClientAuthHashScheme.HASH_SHA1));
+            varString = getHTTPVarString(params);
+
+            varString = getHTTPVarString(params);
+            String ignret = callProcOverJSONRaw(varString, expectedCode);
+        }
+        return ret;
     }
 
     public static Response responseFromJSON(String jsonStr) throws JSONException, IOException {
@@ -1002,6 +1012,39 @@ public class TestJSONInterface extends TestCase {
                 Response resp = responseFromJSON(respstr);
                 assertEquals(ClientResponse.SUCCESS, resp.status);
             }
+
+            VoltProjectBuilder builder3 = new VoltProjectBuilder();
+            builder3.addSchema(schemaPath);
+            builder3.addPartitionInfo("HELLOWORLD", "DIALECT");
+
+            // Same groups
+            builder3.addRoles(new RoleInfo[]{gi});
+
+            ui = new UserInfo[1];
+            ui[0] = new UserInfo("ry@nlikesthe",
+                    "D033E22AE348AEB5660FC2140AEC35850C4DA9978C6976E5B5410415BDE908BD4DEE15DFB167A9C873FC4BB8A81F6F2AB448A918",
+                    new String[]{"foo"}, false);
+            builder3.addUsers(ui);
+
+            builder3.setSecurityEnabled(true, true);
+            builder3.addProcedures(pi);
+            builder3.setHTTPDPort(8095);
+
+            success = builder3.compile(Configuration.getPathToCatalogForTest("json-update.jar"));
+            assertTrue(success);
+
+            pset = ParameterSet.fromArrayNoCopy(Encoder.hexEncode(MiscUtils.fileToBytes(new File(config.m_pathToCatalog))),
+                    new String(MiscUtils.fileToBytes(new File(builder3.getPathToDeployment())), "UTF-8"));
+            response = callProcOverJSON("@UpdateApplicationCatalog", pset,
+                    "ry@nlikesthe", "y@nkees", true);
+            r = responseFromJSON(response);
+            assertEquals(ClientResponse.SUCCESS, r.status);
+
+            // retest the good auths above
+            ParameterSet ps = ParameterSet.fromArrayNoCopy(ui[0].name + "-X4", "admin-X4", ui[0].name + "-X4");
+            String respstr = callProcOverJSON("Insert", ps, ui[0].name, "admin", false);
+            Response resp = responseFromJSON(respstr);
+            assertEquals(ClientResponse.SUCCESS, resp.status);
         } finally {
             if (server != null) {
                 server.shutdown();
@@ -1047,7 +1090,7 @@ public class TestJSONInterface extends TestCase {
             // test not enabled
             ParameterSet pset = ParameterSet.fromArrayNoCopy("foo", "bar", "foobar");
             try {
-                callProcOverJSON("Insert", pset, null, null, false, false, 403); // HTTP_FORBIDDEN
+                callProcOverJSON("Insert", pset, null, null, false, false, 403, ClientAuthHashScheme.HASH_SHA256); // HTTP_FORBIDDEN
             } catch (Exception e) {
                 // make sure failed due to permissions on http
                 assertTrue(e.getMessage().contains("403"));

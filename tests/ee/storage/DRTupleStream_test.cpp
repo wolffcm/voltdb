@@ -35,6 +35,7 @@
 #include "storage/DRTupleStream.h"
 #include "common/Topend.h"
 #include "common/executorcontext.hpp"
+#include "indexes/tableindexfactory.h"
 #include "boost/smart_ptr.hpp"
 
 using namespace std;
@@ -45,16 +46,24 @@ const int COLUMN_COUNT = 5;
 // size without incestuously using code we're trying to test.  I've
 // pre-computed this magic size for an Exported tuple of 5 integer
 // columns, which includes:
-// 1 Export header column * sizeof(int8_t) = 1
-// 2 bytes for null mask (10 columns rounds to 16, /8 = 2) = 2
-// sizeof(int32_t) for row header = 4
-// 5 * sizeof(int32_t) for tuple data = 40
-// total: 67
+// 1 version byte
+// 1 type byte
+// 8 table signature bytes
+// 4 row length bytes
+// 1 (5 columns rounds to 8, /8 = 1) null mask byte
+// 5 * sizeof(int32_t) = 20 data bytes
+// 4 checksum bytes
+// total: 39
 const int MAGIC_TUPLE_SIZE = 39;
 const int MAGIC_TRANSACTION_SIZE = 36;
-const int MAGIC_BEGIN_SIZE = 22;
 const int MAGIC_TUPLE_PLUS_TRANSACTION_SIZE = MAGIC_TUPLE_SIZE + MAGIC_TRANSACTION_SIZE;
-// 1k buffer
+// More magic: assume we've indexed on precisely one of those integer
+// columns. Then our magic size should reduce the 5 * sizeof(int32_t) to:
+// 4 index checksum bytes
+// 1 * sizeof(int32_t) = 4 data bytes
+// new total: 27
+const int MAGIC_OPTIMIZED_TUPLE_SIZE = 27;
+const int MAGIC_OPTIMIZED_TUPLE_PLUS_TRANSACTION_SIZE = MAGIC_OPTIMIZED_TUPLE_SIZE + MAGIC_TRANSACTION_SIZE;
 const int BUFFER_SIZE = 950;
 // roughly 22.5k
 const int LARGE_BUFFER_SIZE = 21375;
@@ -65,8 +74,11 @@ static int64_t addPartitionId(int64_t value) {
 
 class DRTupleStreamTest : public Test {
 public:
-    DRTupleStreamTest() : m_schema(NULL), m_tuple(NULL),
-        m_context(new ExecutorContext( 1, 1, NULL, &m_topend, NULL, NULL, "localhost", 2, &m_wrapper, NULL)) {
+    DRTupleStreamTest()
+      : m_context(new ExecutorContext(1, 1, NULL, &m_topend, NULL,
+                                      (NValueArray*)NULL, (VoltDBEngine*)NULL,
+                                      "localhost", 2, &m_wrapper, NULL))
+    {
         m_wrapper.m_enabled = true;
         srand(0);
         // set up the schema used to fill the new buffer
@@ -101,7 +113,7 @@ public:
         m_tuple->move(m_tupleMemory);
     }
 
-    size_t appendTuple(int64_t lastCommittedSpHandle, int64_t currentSpHandle)
+    size_t appendTuple(int64_t lastCommittedSpHandle, int64_t currentSpHandle, DRRecordType type = DR_RECORD_INSERT, TableIndex* index = NULL, uint32_t indexCrc = 0)
     {
         // fill a tuple
         for (int col = 0; col < COLUMN_COUNT; col++) {
@@ -112,7 +124,7 @@ public:
         currentSpHandle = addPartitionId(currentSpHandle);
         // append into the buffer
         return m_wrapper.appendTuple(lastCommittedSpHandle, tableHandle, currentSpHandle,
-                               currentSpHandle, currentSpHandle, *m_tuple, DR_RECORD_INSERT);
+                               currentSpHandle, currentSpHandle, *m_tuple, type, index, indexCrc);
     }
 
     virtual ~DRTupleStreamTest() {
@@ -192,6 +204,7 @@ TEST_F(DRTupleStreamTest, DoOneTuple)
 
     // write a new tuple and then flush the buffer
     appendTuple(1, 2);
+    m_wrapper.endTransaction();
     m_wrapper.periodicFlush(-1, addPartitionId(2));
 
     // we should only have one tuple in the buffer
@@ -209,12 +222,14 @@ TEST_F(DRTupleStreamTest, BasicOps)
     for (int i = 1; i < 10; i++)
     {
         appendTuple(i-1, i);
+        m_wrapper.endTransaction();
     }
     m_wrapper.periodicFlush(-1, addPartitionId(9));
 
     for (int i = 10; i < 20; i++)
     {
         appendTuple(i-1, i);
+        m_wrapper.endTransaction();
     }
     m_wrapper.periodicFlush(-1, addPartitionId(19));
 
@@ -233,6 +248,46 @@ TEST_F(DRTupleStreamTest, BasicOps)
     EXPECT_EQ(results->offset(), (MAGIC_TUPLE_PLUS_TRANSACTION_SIZE * 10));
 }
 
+
+TEST_F(DRTupleStreamTest, OptimizedDeleteFormat) {
+    vector<int> columnIndices(1, 0);
+    TableIndexScheme scheme = TableIndexScheme("the_index", HASH_TABLE_INDEX,
+                                               columnIndices, TableIndex::simplyIndexColumns(),
+                                               true, true, m_schema);
+    TableIndex *index = TableIndexFactory::getInstance(scheme);
+    uint32_t indexCrc = 42;
+    for (int i = 1; i < 10; i++)
+    {
+        // first, send some delete records with an index
+        appendTuple(i-1, i, DR_RECORD_DELETE, index, indexCrc);
+        m_wrapper.endTransaction();
+    }
+    m_wrapper.periodicFlush(-1, addPartitionId(9));
+    delete index;
+
+    for (int i = 10; i < 20; i++)
+    {
+        // then send some delete records without an index
+        appendTuple(i-1, i, DR_RECORD_DELETE);
+        m_wrapper.endTransaction();
+    }
+    m_wrapper.periodicFlush(-1, addPartitionId(19));
+
+    // get the first buffer flushed
+    ASSERT_TRUE(m_topend.receivedDRBuffer);
+    boost::shared_ptr<StreamBlock> results = m_topend.blocks.front();
+    m_topend.blocks.pop_front();
+    EXPECT_EQ(results->uso(), 0);
+    EXPECT_EQ(results->offset(), (MAGIC_OPTIMIZED_TUPLE_PLUS_TRANSACTION_SIZE * 9));
+
+    // now get the second
+    ASSERT_FALSE(m_topend.blocks.empty());
+    results = m_topend.blocks.front();
+    m_topend.blocks.pop_front();
+    EXPECT_EQ(results->uso(), (MAGIC_OPTIMIZED_TUPLE_PLUS_TRANSACTION_SIZE * 9));
+    EXPECT_EQ(results->offset(), (MAGIC_TUPLE_PLUS_TRANSACTION_SIZE * 10));
+}
+
 /**
  * Verify that a periodicFlush with distant TXN IDs works properly
  */
@@ -241,12 +296,14 @@ TEST_F(DRTupleStreamTest, FarFutureFlush)
     for (int i = 1; i < 10; i++)
     {
         appendTuple(i-1, i);
+        m_wrapper.endTransaction();
     }
     m_wrapper.periodicFlush(-1, addPartitionId(99));
 
     for (int i = 100; i < 110; i++)
     {
         appendTuple(i-1, i);
+        m_wrapper.endTransaction();
     }
     m_wrapper.periodicFlush(-1, addPartitionId(130));
 
@@ -275,6 +332,7 @@ TEST_F(DRTupleStreamTest, Fill) {
     for (int i = 1; i <= tuples_to_fill; i++)
     {
         appendTuple(i-1, i);
+        m_wrapper.endTransaction();
     }
     // We shouldn't yet get a buffer because we haven't forced the
     // generation of a new one by exceeding the current one.
@@ -282,6 +340,7 @@ TEST_F(DRTupleStreamTest, Fill) {
 
     // now, drop in one more
     appendTuple(tuples_to_fill, tuples_to_fill + 1);
+    m_wrapper.endTransaction();
 
     ASSERT_TRUE(m_topend.receivedDRBuffer);
     boost::shared_ptr<StreamBlock> results = m_topend.blocks.front();
@@ -298,6 +357,7 @@ TEST_F(DRTupleStreamTest, FillSingleTxnAndAppend) {
 
     int tuples_to_fill = (BUFFER_SIZE - MAGIC_TRANSACTION_SIZE) / MAGIC_TUPLE_SIZE;
     appendTuple(0, 1);
+    m_wrapper.endTransaction();
     // fill with just enough tuples to avoid exceeding buffer
     for (int i = 2; i <= tuples_to_fill; i++)
     {
@@ -315,7 +375,7 @@ TEST_F(DRTupleStreamTest, FillSingleTxnAndAppend) {
     ASSERT_TRUE(m_topend.receivedDRBuffer);
 
     // now, finally drop in a tuple that closes the first TXN
-    appendTuple(2, 3);
+    m_wrapper.endTransaction();
 
     ASSERT_TRUE(m_topend.receivedDRBuffer);
     boost::shared_ptr<StreamBlock> results = m_topend.blocks.front();
@@ -332,6 +392,7 @@ TEST_F(DRTupleStreamTest, FillSingleTxnAndFlush) {
 
     int tuples_to_fill = (BUFFER_SIZE - MAGIC_TRANSACTION_SIZE) / MAGIC_TUPLE_SIZE;
     appendTuple(0, 1);
+    m_wrapper.endTransaction();
     // fill with just enough tuples to avoid exceeding buffer
     for (int i = 2; i <= tuples_to_fill; i++)
     {
@@ -349,6 +410,7 @@ TEST_F(DRTupleStreamTest, FillSingleTxnAndFlush) {
     ASSERT_TRUE(m_topend.receivedDRBuffer);
 
     // Now, flush the buffer with the tick
+    m_wrapper.endTransaction();
     m_wrapper.periodicFlush(-1, addPartitionId(2));
 
     // should be able to get 2 buffers, one full and one with one tuple
@@ -372,6 +434,7 @@ TEST_F(DRTupleStreamTest, TxnSpanTwoBuffers)
     for (int i = 1; i <= 10; i++)
     {
         appendTuple(i-1, i);
+        m_wrapper.endTransaction();
     }
 
     int tuples_to_fill = 10;
@@ -379,6 +442,7 @@ TEST_F(DRTupleStreamTest, TxnSpanTwoBuffers)
     {
         appendTuple(10, 11);
     }
+    m_wrapper.endTransaction();
     m_wrapper.periodicFlush(-1, addPartitionId(11));
 
     // get the first buffer flushed
@@ -405,6 +469,7 @@ TEST_F(DRTupleStreamTest, TxnSpanBigBuffers)
     for (int i = 1; i <= tuples_to_fill_buffer; i++)
     {
         appendTuple(i-1, i);
+        m_wrapper.endTransaction();
     }
 
     int tuples_to_fill_large_buffer = (LARGE_BUFFER_SIZE - MAGIC_TRANSACTION_SIZE) / MAGIC_TUPLE_SIZE;
@@ -413,6 +478,7 @@ TEST_F(DRTupleStreamTest, TxnSpanBigBuffers)
         appendTuple(tuples_to_fill_buffer, tuples_to_fill_buffer + 1);
     }
 
+    m_wrapper.endTransaction();
     m_wrapper.periodicFlush(-1, addPartitionId(tuples_to_fill_buffer + 1));
 
     // get the first buffer flushed
@@ -460,19 +526,19 @@ TEST_F(DRTupleStreamTest, FillSingleTxnAndCommitWithRollback) {
 
     int tuples_to_fill = (BUFFER_SIZE - MAGIC_TRANSACTION_SIZE) / MAGIC_TUPLE_SIZE;
     // fill with just enough tuples to avoid exceeding buffer
-    size_t mark = 0;
     for (int i = 1; i <= tuples_to_fill; i++)
     {
-        mark = appendTuple(0, 1);
+        appendTuple(0, 1);
     }
     // We shouldn't yet get a buffer because we haven't forced the
     // generation of a new one by exceeding the current one.
     ASSERT_FALSE(m_topend.receivedDRBuffer);
+    m_wrapper.endTransaction();
 
     // now, drop in one more on a new TXN ID.  This should commit
     // the whole first buffer.  Roll back the new tuple and make sure
     // we have a good buffer
-    appendTuple(1, 2);
+    size_t mark = appendTuple(1, 2);
     m_wrapper.rollbackTo(mark);
 
     // so flush and make sure we got something sane
@@ -514,6 +580,7 @@ TEST_F(DRTupleStreamTest, RollbackFirstTuple)
 
     // write a new tuple and then flush the buffer
     appendTuple(2, 3);
+    m_wrapper.endTransaction();
     m_wrapper.periodicFlush(-1, addPartitionId(3));
 
     // we should only have one tuple in the buffer
@@ -537,6 +604,7 @@ TEST_F(DRTupleStreamTest, RollbackMiddleTuple)
     for (int i = 1; i <= 10; i++)
     {
          appendTuple(i-1, i);
+         m_wrapper.endTransaction();
     }
 
     // add another and roll it back and flush
@@ -548,7 +616,7 @@ TEST_F(DRTupleStreamTest, RollbackMiddleTuple)
     boost::shared_ptr<StreamBlock> results = m_topend.blocks.front();
     m_topend.blocks.pop_front();
     EXPECT_EQ(results->uso(), 0);
-    EXPECT_EQ(results->offset(), (MAGIC_TUPLE_PLUS_TRANSACTION_SIZE * 10) + MAGIC_BEGIN_SIZE);
+    EXPECT_EQ(results->offset(), MAGIC_TUPLE_PLUS_TRANSACTION_SIZE * 10);
 }
 
 /**
@@ -561,6 +629,7 @@ TEST_F(DRTupleStreamTest, RollbackWholeBuffer)
     for (int i = 1; i <= 10; i++)
     {
         appendTuple(i-1, i);
+        m_wrapper.endTransaction();
     }
 
     // now, fill a couple of buffers with tuples from a single transaction

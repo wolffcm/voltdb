@@ -45,7 +45,6 @@ import java.util.regex.PatternSyntaxException;
 
 import org.junit.Test;
 import org.voltdb.parser.SQLParser;
-import org.voltdb.parser.SQLParser.ExecuteCallResults;
 import org.voltdb.parser.SQLParser.FileInfo;
 
 import com.google_voltpatches.common.base.Joiner;
@@ -261,7 +260,6 @@ public class TestSqlCmdInterface
     @Test
     public void testParseQuery21() throws FileNotFoundException {
         ID = 21;
-
         SQLCommand.testFrontEndOnly();
         final String fileName = "./tests/frontend/org/voltdb/utils/localQry.txt";
         String fileCmd = "file " + fileName;
@@ -368,43 +366,6 @@ public class TestSqlCmdInterface
         assertThis(raw, expected, 1, ID);
     }
 
-    // To test parseQueryProcedureCallParameters()
-    // To test a valid query: 'exec @SystemCatalog,      tables'
-    @Test
-    public void testParseQueryProcedureCallParameters23() {
-        ID = 23;
-        String query = "exec @SystemCatalog,     tables";
-        String expected = query.replace("exec", "");
-        expected = expected.replaceAll("[,\\s]+", " ");
-        assertThis2(query, expected, 2, ID);
-    }
-
-    // To test parseQueryProcedureCallParameters()
-    // To test a valid query: 'exec ,, @SystemCatalog,,,,tables'
-    // This test case is PASSED, which is kind of a surprise and shows that syntax could be too loose
-    @Test
-    public void testParseQueryProcedureCallParameters24() {
-        ID = 24;
-        String query = "exec ,, @SystemCatalog,,,,tables";
-        String expected = query.replace("exec", "");
-        expected = expected.replaceAll("[,\\s]+", " ");
-        assertThis2(query, expected, 2, ID);
-    }
-
-    // To test parseQueryProcedureCallParameters()
-    // To test a valid query: 'exec,, @SystemCatalog,,,,tables'
-    // This test case is FAILED, which is also a surprise, because test case 23 is PASSED.
-    // This further demonstrates that syntax is too loose, but NOT flexible.
-    // Bug 3422
-    @Test
-    public void testParseQueryProcedureCallParameters25() {
-        ID = 25;
-        String query = "exec,, @SystemCatalog,,,,tables";
-        String expected = query.replace("exec", "");
-        expected = expected.replaceAll("[,\\s]+", " ");
-        assertThis2(query, expected, 2, ID);
-    }
-
     // To assert the help page printed by SQLCommand.printHelp() is identical to the
     // original static help file 'SQLCommandReadme.txt'. For ENG-3440
     @Test
@@ -443,19 +404,6 @@ public class TestSqlCmdInterface
         }
     }
 
-    // 27) Make sure we don't get fooled by store procedures that with names that start
-    //     with SQL keywords
-    @Test
-    public void testSneakyNamedProcedure() {
-        String query = "exec selectMasterDonner, 0, 1;";
-        ID = 27;
-        String expected = query;
-        assertThis(query, expected, 1, ID);
-        expected = query.replace("exec", "");
-        expected = expected.replaceAll("[,\\s]+", " ");
-        assertThis2(query, expected, 3, ID);
-    }
-
     @Test
     public void testParseCreateView()
     {
@@ -478,6 +426,33 @@ public class TestSqlCmdInterface
         assertThis(create, create, 1, ID);
         create = "create procedure foo as SELECT * FROM table UNION SELECT * FROM table2;";
         assertThis(create, create, 1, ID);
+    }
+
+    // test select statement with FROM subquery
+    @Test
+    public void testParseQuery30() {
+        String raw = "SELECT * FROM (SELECT * FROM table2);";
+        String expected = raw;
+        ID = 30;
+        assertThis(raw, expected, 1, ID);
+    }
+
+    // test select statement with IN subquery
+    @Test
+    public void testParseQuery31() {
+        String raw = "SELECT * FROM table1 WHERE (A,C) IN ( SELECT A,C FROM table2);";
+        String expected = raw;
+        ID = 31;
+        assertThis(raw, expected, 1, ID);
+    }
+
+    // test select statement with EXISTS subquery
+    @Test
+    public void testParseQuery32() {
+        String raw = "SELECT * FROM table1 WHERE EXISTS( SELECT 1FROM table2);";
+        String expected = raw;
+        ID = 32;
+        assertThis(raw, expected, 1, ID);
     }
 
     private void assertThis(String qryStr, int numOfQry, int testID) {
@@ -510,22 +485,6 @@ public class TestSqlCmdInterface
         else {
             assertFalse(msg+err2, cleanQryStr.equalsIgnoreCase(parsedString));
         }
-    }
-
-    private void assertThis2(String query, String cleanQryStr, int num, int testID) {
-        ExecuteCallResults results = SQLParser.parseExecuteCallWithoutParameterTypes(query);
-        assertNotNull(results);
-        assertNotNull(results.procedure);
-        assertFalse(results.procedure.isEmpty());
-        int numQueries = results.params.size() + 1;
-        String parsedString = " " + results.procedure + " " + Joiner.on(" ").join(results.params);
-        String msg = "\nTest ID: " + testID + ". ";
-        String err1 = "\nExpected # of queries: " + num + "\n";
-        err1 += "Actual # of queries: " + numQueries + "\n";
-        assertEquals(msg+err1, num, numQueries);
-        String err2 = "\nExpected queries: \n#" + cleanQryStr + "#\n";
-        err2 += "Actual queries: \n#" + parsedString + "#\n";
-        assertTrue(msg+err2, cleanQryStr.equalsIgnoreCase(parsedString));
     }
 
     @Test

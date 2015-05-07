@@ -23,12 +23,23 @@
 
 package org.voltdb.parser;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import junit.framework.TestCase;
 
+import org.junit.Test;
+import org.voltdb.parser.SQLParser.ExecuteCallResults;
 import org.voltdb.parser.SQLParser.FileOption;
+import org.voltdb.parser.SQLParser.ParseRecallResults;
+import org.voltdb.utils.Encoder;
+
+import com.google_voltpatches.common.base.Joiner;
 
 public class TestSQLParser extends TestCase {
 
@@ -342,6 +353,26 @@ public class TestSQLParser extends TestCase {
         return cleanCommand;
     }
 
+    private void expectFromAll(boolean fudge, String expected, String... candidates) {
+        for (String candidate : candidates) {
+            String got = parseVoltDBSpecificDdlStatementPreamble(candidate, fudge);
+            // Guarding assert to makes breakpoints easier.
+            if (got == null) {
+                if (expected == null) {
+                    continue;
+                }
+            }
+            else if (got.equals(expected)) {
+                continue;
+            }
+            // Retry before reporting failure for chance to debug.
+            got = parseVoltDBSpecificDdlStatementPreamble(candidate, fudge);
+            // sure to fail
+            assertEquals("For input '" + candidate + "'" + (fudge ? " fudging " : " "),
+                         expected, got);
+        }
+    }
+
     public void testParseVoltDBSpecificDDLStatementPreambles() {
 
         expectFromAll(true, "CREATE PROCEDURE",
@@ -372,23 +403,282 @@ public class TestSQLParser extends TestCase {
                 "create role ;");
     }
 
-    private void expectFromAll(boolean fudge, String expected, String... candidates) {
-        for (String candidate : candidates) {
-            String got = parseVoltDBSpecificDdlStatementPreamble(candidate, fudge);
-            // Guarding assert to makes breakpoints easier.
-            if (got == null) {
-                if (expected == null) {
-                    continue;
-                }
-            }
-            else if (got.equals(expected)) {
-                continue;
-            }
-            // Retry before reporting failure for chance to debug.
-            got = parseVoltDBSpecificDdlStatementPreamble(candidate, fudge);
-            // sure to fail
-            assertEquals("For input '" + candidate + "'" + (fudge ? " fudging " : " "),
-                         expected, got);
+    public void testParseRecall()
+    {
+        parseRecallCase("RECALL 1", 1);
+        parseRecallCase("  RECALL 2 ", 2);
+        parseRecallCase("RECALL 33;", 33);
+        parseRecallCase("recall 99 ;", 99);
+        parseRecallCase("RECALL 100 ; ", 100);
+
+        // Try too short commands.
+        parseRecallErrorCase("RECALL");
+        parseRecallErrorCase("RECALL ");
+        parseRecallErrorCase("Recall;");
+        parseRecallErrorCase("RECALL ;");
+
+        // Try interspersed garbage.
+        parseRecallErrorCase("RECALL abc 1");
+        parseRecallErrorCase("RECALL 2 def");
+        parseRecallErrorCase("RECALL 33;ghi");
+        parseRecallErrorCase("RECALL 44 jkl;");
+
+        parseRecallErrorCase("RECALL mno");
+        parseRecallErrorCase("RECALL; pqr");
+        parseRecallErrorCase("RECALL ;stu");
+
+        // Try invalid keyword terminators
+        parseRecallErrorCase("RECALL,1");
+        parseRecallErrorCase("RECALL. 1");
+        parseRecallErrorCase("RECALL'1;");
+        parseRecallErrorCase("RECALL( 1;");
+        parseRecallErrorCase("RECALL(1);");
+        parseRecallErrorCase("RECALL- 1 ;");
+        parseRecallErrorCase("RECALL,");
+        parseRecallErrorCase("RECALL, ");
+        parseRecallErrorCase("RECALL,;");
+        parseRecallErrorCase("RECALL, ;");
+
+        // Try imaginative usage.
+        parseRecallErrorCase("RECALL 1 3;");
+        parseRecallErrorCase("RECALL 1,3;");
+        parseRecallErrorCase("RECALL 1, 3;");
+        parseRecallErrorCase("RECALL 1-3;");
+        parseRecallErrorCase("RECALL 1..3;");
+
+        // Try invalid numerics
+        parseRecallErrorCase("RECALL 0");
+        parseRecallErrorCase("recall -2;");
+        parseRecallErrorCase("RECALL 101");
+        parseRecallErrorCase("recall 1000;");
+
+        // confirm that the recall command parser does not overstep
+        // its mandate and try to process anything but a recall command.
+        assertNull(SQLParser.parseRecallStatement("RECAL", 99));
+        assertNull(SQLParser.parseRecallStatement("recal 1", 99));
+        assertNull(SQLParser.parseRecallStatement("RECALL1", 99));
+        assertNull(SQLParser.parseRecallStatement("RECALLL", 99));
+        assertNull(SQLParser.parseRecallStatement("RECALLL 1", 99));
+        assertNull(SQLParser.parseRecallStatement("HELP;", 99));
+        assertNull(SQLParser.parseRecallStatement("FILE ddl.sql", 99));
+        assertNull(SQLParser.parseRecallStatement("@RECALL 1", 99));
+        assertNull(SQLParser.parseRecallStatement("--recall 1", 99));
+        assertNull(SQLParser.parseRecallStatement("ECALL 1", 99));
+    }
+
+    private void parseRecallCase(String lineText, int lineNumber)
+    {
+        ParseRecallResults result = SQLParser.parseRecallStatement(lineText, 99);
+        assertNotNull(result);
+        assertNull(result.getError());
+        // Line number inputs are 1-based but getLine() results are 0-based
+        assertEquals(lineNumber, result.getLine()+1);
+    }
+
+    private void parseRecallErrorCase(String lineText)
+    {
+        ParseRecallResults result = SQLParser.parseRecallStatement(lineText, 99);
+        assertNotNull(result);
+        assertNotNull(result.getError());
+    }
+
+    // To test the schema-independent parts of SQLParser.parseExecuteCallInternal()
+    @Test
+    public void testParseExecParameters() {
+        // Many of these simple or stupid cases were migrated from TestSqlCmdInterface.
+        // They're more properly SQLParse tests than SQLCommand tests.
+        validateSimpleExec("exec @SystemCatalog tables", 2, 20);
+        validateSimpleExec("exec @SystemCatalog,     tables", 2, 21);
+        validateSimpleExec("exec ,, @SystemCatalog,,,,tables", 2, 22);
+        validateSimpleExec("exec,, @SystemCatalog,,,,tables", 2, 23);
+        validateSimpleExec("exec selectMasterDonner, 0, 1;", 3, 24);
+        validateSimpleExec("exec T.insert abcd 123", 3, 25);
+        validateSimpleExec("exec T.insert 'abcd' '123'", 3, 26);
+
+        // test that quote parsing preserves AT LEAST well-formed quoted quotes.
+        validateSimpleExec("exec myproc 'ab''cd' '''123' 'XYZ'''", 4, 29);
+
+        // These special case tests exercise parseExecuteCallInternal
+        // but they validate it against a different query rewriter that purposely
+        // recognizes a subset of the valid separators. It uses this handicap as
+        // an advantage, properly "failing" to recognize other separators that
+        // just happen to always be quoted in these carefully constructed test
+        // queries.
+        // Testing of quoted separators guards against regression of ENG-7927
+        validateSpecialExecAssumeSeparator(",", "exec,A.insert,'  ;','a b',';\t; '", 4, 31);
+        validateSpecialExecAssumeSeparator(" ", "exec A.upsert '\t\t;'  'a\tb' ';,\t\t'", 4, 32);
+        // test that quote parsing preserves AT LEAST well-formed quoted quotes among separators
+        validateSpecialExecAssumeSeparator(",", "exec,proc,'''  ;','a ''b',';\t; '", 4, 41);
+        validateSpecialExecAssumeSeparator(" ", "exec proc '''\t\t;'  'a\t''b' ';'',\t\t'''", 4, 42);
+
+    }
+
+    // Allow normal full range of quoted separators -- except for the one specified
+    // -- for better testing of quoted string handling.
+    private void validateSpecialExecAssumeSeparator(String separator,
+            String query, int num, int testID)
+    {
+        String separatorPattern = "[" + separator + "]+";
+        validateExec(separatorPattern, query, num, testID);
+    }
+
+    private void validateSimpleExec(String query, int num, int testID) {
+        // Allow normal full range of separators
+        // -- at least when no such characters are being quoted.
+        validateExec("[,\\s]+", query, num, testID);
+    }
+
+    // This is a cleaned up version of an obsolete test helper called
+    // TestSqlCmdInterface.assertThis2
+    private void validateExec(String separatorPattern, String query, int numExpected, int testID)
+    {
+        ExecuteCallResults results = SQLParser.parseExecuteCallWithoutParameterTypes(query);
+        assertNotNull(results);
+        assertNotNull(results.procedure);
+        assertFalse(results.procedure.isEmpty());
+        String msg = "\nTest ID: " + testID + ". ";
+
+        String expected = query.replace("exec", "");
+        expected = expected.replaceAll(separatorPattern, "/");
+        expected += "/ Total:" + numExpected;
+
+        String parsedString = "/" + results.procedure + "/" +
+                Joiner.on("/").join(results.params);
+        parsedString += "/ Total:" + (results.params.size() + 1);
+
+        assertEquals(msg + " '" + expected + "' vs. '" + parsedString + "'",
+                expected, parsedString);
+    }
+
+    // Add an entry to the procedures map for a function with the given
+    // signature
+    private void addToProcsMap(Map<String, Map<Integer, List<String>>> procs, String procName, String... paramTypes) {
+        Map<Integer, List<String>> signatures = new HashMap<>();
+        List<String> paramTypesList = new ArrayList<>();
+
+        for (String paramType : paramTypes) {
+            paramTypesList.add(paramType);
         }
+
+        signatures.put(paramTypesList.size(), paramTypesList);
+
+        procs.put(procName, signatures);
+    }
+
+    private void assertParamsParseAs(
+            Map<String, Map<Integer, List<String>>> procs,
+            Object[] expectedParams,
+            String execCommand) {
+        ExecuteCallResults results = SQLParser.parseExecuteCall(execCommand, procs);
+        Object[] actualParams = results.getParameterObjects();
+
+        int numActualParams = actualParams.length;
+        assertEquals("SQLParser produced wrong number of parameters",
+                expectedParams.length, numActualParams);
+
+        for (int i = 0; i < numActualParams; ++i) {
+            if (expectedParams[i] instanceof byte[]) {
+                // byte[] doesn't override equals and just compares references.
+                // Need to use Arrays.equals instead here.
+                assertTrue(actualParams[i] instanceof byte[]);
+
+                byte[] expectedByteArray = (byte[])expectedParams[i];
+                byte[] actualByteArray = (byte[])actualParams[i];
+
+                assertTrue(Arrays.equals(expectedByteArray, actualByteArray));
+            }
+            else {
+                assertEquals(expectedParams[i], actualParams[i]);
+            }
+        }
+    }
+
+    private static void assertParamParsingFails(
+            Map<String, Map<Integer, List<String>>> procs,
+            String expectedMessage,
+            String execCommand) {
+
+        try {
+            ExecuteCallResults results = SQLParser.parseExecuteCall(execCommand, procs);
+            results.getParameterObjects();
+        }
+        catch (Exception exc) {
+            assertTrue("Expected parsing to fail with message '"
+                    + expectedMessage + "', but instead it failed with '"
+                    + exc.getMessage() + "'.",
+                    exc.getMessage().contains(expectedMessage));
+            return;
+        }
+
+        fail("Expected parsing to fail with message '"
+                + expectedMessage + "', but it didn't fail.");
+    }
+
+    @Test
+    public void testExecHexLiteralParamsVarbinary() {
+
+        Map<String, Map<Integer, List<String>>> procs = new HashMap<>();
+        addToProcsMap(procs, "myProc_vb", "varbinary");
+
+        // 0-length hex string is okay.
+        assertParamsParseAs(procs,
+                new Object[] {new byte[] {}},
+                "exec myProc_vb x''");
+        assertParamsParseAs(procs,
+                new Object[] {new byte[] {}},
+                "exec myProc_vb ''");
+
+        assertParamsParseAs(procs,
+                new byte[][] {{(byte) 255}},
+                "exec myProc_vb x'ff'");
+        assertParamsParseAs(procs,
+                new byte[][] {{(byte) 255}},
+                "exec myProc_vb 'ff'");
+
+        assertParamsParseAs(procs,
+                new Object[] {Encoder.hexDecode("deadbeef")},
+                "exec myProc_vb x'deadbeef'");
+        assertParamsParseAs(procs,
+                new Object[] {Encoder.hexDecode("deadbeef")},
+                "exec myProc_vb 'deadbeef'");
+
+        // number of hex digits must be even in varbinary context.
+        assertParamParsingFails(procs, "String is not properly hex-encoded.",
+                "exec myProc_vb x'a'");
+        assertParamParsingFails(procs, "String is not properly hex-encoded.",
+                "exec myProc_vb x'abc'");
+    }
+
+    @Test
+    public void testExecHexLiteralParamsBigint() {
+
+        Map<String, Map<Integer, List<String>>> procs = new HashMap<>();
+        addToProcsMap(procs, "myProc_bi", "bigint");
+
+        assertParamsParseAs(procs,
+                new Object[] {Long.parseLong("deadbeef", 16)},
+                "exec myProc_bi x'deadbeef'");
+
+        assertParamsParseAs(procs,
+                new Long[] {-1L},
+                "exec myProc_bi x'ffffffffffffffff'");
+
+        assertParamsParseAs(procs,
+                new Long[] {-16L},
+                "exec myProc_bi x'fffffffffffffff0'");
+
+        // a minus sign isn't allowed to indicate negative values.
+        assertParamParsingFails(procs,
+                "Expected a long numeric value, got 'x'-10''",
+                "exec myProc_bi x'-10'");
+
+        assertParamParsingFails(procs,
+                "Zero hexadecimal digits is invalid for BIGINT value",
+                "exec myProc_bi x''");
+
+        assertParamParsingFails(procs,
+                "Too many hexadecimal digits for BIGINT value",
+                "exec myProc_bi x'ffffffffffffffff0'");
+
     }
 }
