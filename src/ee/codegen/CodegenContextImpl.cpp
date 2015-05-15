@@ -26,7 +26,6 @@
 
 #include "codegen/CodegenContextImpl.hpp"
 #include "codegen/ExprGenerator.hpp"
-#include "codegen/PlanNodeFnGenerator.hpp"
 #include "codegen/PredFnGenerator.hpp"
 #include "common/SQLException.h"
 #include "common/TupleSchema.h"
@@ -39,8 +38,6 @@
 #include "expressions/abstractexpression.h"
 #include "expressions/comparisonexpression.h"
 #include "expressions/operatorexpression.h"
-#include "plannodes/seqscannode.h"
-#include "plannodes/projectionnode.h"
 
 #include "llvm/Analysis/Passes.h"
 #include "llvm/Analysis/Verifier.h"
@@ -142,7 +139,6 @@ namespace voltdb { namespace {
         // Add the extern "C" functions above to the module
         void addPrototypes(llvm::Module* module) {
 
-            PlanNodeFnGenerator::addExternalPrototypes(module);
             ExprGenerator::addExternalPrototypes(module);
 
             llvm::LLVMContext& ctx = module->getContext();
@@ -313,30 +309,6 @@ namespace voltdb { namespace {
         }
 
         return (PredFunction)generateCode(predFnGenerator.getFunction());
-    }
-
-    PlanNodeFunction
-    CodegenContextImpl::compilePlanNode(AbstractExecutor *executor) {
-        AbstractPlanNode *node = executor->getPlanNode();
-        VOLT_DEBUG("Attempting to compile plan node: %s", node->debug().c_str());
-        PlanNodeFnGenerator planNodeFnGenerator(this, executor);
-        planNodeFnGenerator.init(node);
-        boost::timer t;
-
-        try {
-            t.restart();
-            planNodeFnGenerator.codegen(node);
-            VOLT_DEBUG("Plan node IR construction took %f seconds", t.elapsed());
-        }
-        catch (UnsupportedForCodegenException& ex) {
-            planNodeFnGenerator.getFunction()->eraseFromParent();
-            VOLT_DEBUG("Aborted compilation: %s", ex.getMessage().c_str());
-
-            // EE will fall back to interpreting function
-            return NULL;
-        }
-
-        return (PlanNodeFunction)generateCode(planNodeFnGenerator.getFunction());
     }
 
     void CodegenContextImpl::shutdownLlvm() {

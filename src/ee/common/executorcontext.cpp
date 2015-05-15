@@ -78,7 +78,7 @@ ExecutorContext::~ExecutorContext() {
     // ... or none, now that the one is going away.
     VOLT_DEBUG("De-installing EC(%ld)", (long)this);
 
-    pthread_setspecific(static_key, NULL);
+    pthread_setspecific( static_key, NULL);
 }
 
 void ExecutorContext::bindToThread()
@@ -92,17 +92,13 @@ void ExecutorContext::bindToThread()
 
 ExecutorContext* ExecutorContext::getExecutorContext() {
     (void)pthread_once(&static_keyOnce, createThreadLocalKey);
-    return static_cast<ExecutorContext*>(pthread_getspecific(static_key));
+    return static_cast<ExecutorContext*>(pthread_getspecific( static_key));
 }
 
 PredFunction ExecutorContext::compilePredicate(const std::string& fnName,
                                                const TupleSchema* tupleSchema,
                                                const AbstractExpression* expr) {
     return m_codegenContext->compilePredicate(fnName, tupleSchema, expr);
-}
-
-PlanNodeFunction ExecutorContext::compilePlanNode(AbstractExecutor* executor) {
-    return m_codegenContext->compilePlanNode(executor);
 }
 
 Table* ExecutorContext::executeExecutors(int subqueryId) const
@@ -155,7 +151,7 @@ Table* ExecutorContext::executeExecutors(const std::vector<AbstractExecutor*>& e
                 AbstractPlanNode *inlineNode = it->second;
                 inlineNode->getExecutor()->cleanupMemoryPool();
             }
-        }
+}
 
         if (subqueryId == 0) {
             VOLT_TRACE("The Executor's execution at position '%d' failed", ctr);

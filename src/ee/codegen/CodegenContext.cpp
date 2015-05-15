@@ -35,11 +35,6 @@ namespace voltdb {
         return m_impl->compilePredicate(fnName, tupleSchema, expr);
     }
 
-    PlanNodeFunction
-    CodegenContext::compilePlanNode(AbstractExecutor *executor) {
-        return m_impl->compilePlanNode(executor);
-    }
-
     void CodegenContext::shutdownLlvm() {
         CodegenContextImpl::shutdownLlvm();
     }

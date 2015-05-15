@@ -508,14 +508,6 @@ enum Endianess { BYTE_ORDER_BIG_ENDIAN = 0, BYTE_ORDER_LITTLE_ENDIAN = 1 };
 typedef int8_t(*PredFunction)(char*);
 
 // ------------------------------------------------------------------
-// Pointer to plan node function type:
-// Pointer to a function that accepts two tables (input, output)
-// returns bool (true on success)
-// ------------------------------------------------------------------
-class Table;
-typedef bool(*PlanNodeFunction)(Table*,Table*);
-
-// ------------------------------------------------------------------
 // Utility functions.
 // -----------------------------------------------------------------
 std::string getTypeName(ValueType type);

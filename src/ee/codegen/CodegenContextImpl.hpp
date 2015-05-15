@@ -55,8 +55,6 @@ namespace voltdb {
                                       const TupleSchema* tupleSchema,
                                       const AbstractExpression* expr);
 
-        PlanNodeFunction compilePlanNode(AbstractExecutor* executor);
-
         llvm::Module* getModule();
         llvm::LLVMContext& getLlvmContext();
 

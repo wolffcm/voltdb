@@ -187,7 +187,3 @@ PredFunction AbstractExecutor::compilePredicate(const std::string& fnName,
                                                                    tupleSchema,
                                                                    expr);
 }
-
-PlanNodeFunction AbstractExecutor::compilePlanNode(AbstractExecutor* executor) {
-    return ExecutorContext::getExecutorContext()->compilePlanNode(executor);
-}

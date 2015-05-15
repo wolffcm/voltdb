@@ -212,8 +212,6 @@ class ExecutorContext {
                                   const TupleSchema* tupleSchema,
                                   const AbstractExpression* expr);
 
-    PlanNodeFunction compilePlanNode(AbstractExecutor* executor);
-
     static ExecutorContext* getExecutorContext();
 
     static Pool* getTempStringPool() {
