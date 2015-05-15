@@ -68,7 +68,6 @@ namespace voltdb {
         bool m_isInlined;
     };
 
-    typedef std::pair<llvm::Value*, llvm::Value*> ValuePair;
     // Bundles an llvm::Value* with may-be-null meta-data,
     // as well as the value type and inlined info.
     class CGValue {
@@ -107,12 +106,6 @@ namespace voltdb {
         bool isVarchar() const {
             return ty() == VALUE_TYPE_VARCHAR;
         }
-
-        llvm::Value* getInlinedVarcharTotalLength(llvm::IRBuilder<>& builder) const;
-
-        ValuePair getVarcharLengthAndData(CodegenContextImpl *cgCtx,
-                                          llvm::IRBuilder<>& builder) const;
-
 
     private:
         llvm::Value* m_value;
@@ -159,11 +152,6 @@ namespace voltdb {
         codegenTupleValueExpr(const TupleSchema* schema,
                               const TupleValueExpression* expr);
         llvm::Value*
-        codegenCmpVarchar(ExpressionType exprType,
-                          const CGValue& lhs,
-                          const CGValue& rhs);
-
-        llvm::Value*
         codegenCmpOp(ExpressionType exprType,
                      ValueType outputType,
                      const CGValue& lhs,
@@ -185,9 +173,6 @@ namespace voltdb {
         CGValue
         codegenConstantValueExpr(const TupleSchema*,
                                  const ConstantValueExpression* expr);
-
-        llvm::Function* getExtFn(const std::string& fnName);
-
 
         CodegenContextImpl* m_codegenContext;
         llvm::Function* m_function;

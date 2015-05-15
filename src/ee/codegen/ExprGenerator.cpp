@@ -37,264 +37,36 @@
 
 extern "C" {
 
-    // There are C wrappers for functions called from generated code
-
-    char* stringref_get(voltdb::StringRef* sr) {
-        return sr->get();
-    }
-
-    void stringref_debug(voltdb::StringRef* sr) {
-#if VOLT_LOG_LEVEL<=VOLT_LEVEL_TRACE
-        if (sr != NULL) {
-            VOLT_TRACE("StringRef addr %p", sr);
-            VOLT_TRACE("StringRef get() %p", sr->get());
-
-            const char mask = ~static_cast<char>(OBJECT_NULL_BIT | OBJECT_CONTINUATION_BIT);
-
-            char *data = sr->get();
-            char contBit = data[0] & OBJECT_CONTINUATION_BIT;
-            VOLT_TRACE("  data[0] & OBJECT_CONTINUATION_BIT: %d", contBit);
-            char nullBit = data[0] & OBJECT_NULL_BIT;
-            VOLT_TRACE("  data[0] & OBJECT_NULL_BIT: %d", nullBit);
-            char shortDataSize = data[0] & mask;
-            VOLT_TRACE("  shortDataSize: %d", shortDataSize);
-        }
-        else {
-            VOLT_TRACE("StringRef is NULL");
-        }
-#endif
-    }
+    // C wrappers for functions called from generated code
+    // would go here.
 }
 
 namespace voltdb {
 
     void ExprGenerator::addExternalPrototypes(llvm::Module* module) {
-        llvm::LLVMContext& ctx = module->getContext();
-
-        llvm::Type* charPtrTy = llvm::Type::getInt8PtrTy(ctx);
-        llvm::Type* ptrToStringRefTy = getPtrToStringRefType(ctx);
-        llvm::Type* voidTy = llvm::Type::getVoidTy(ctx);
-
-        // Man page defines strncmp like this
-        //   int strncmp(const char *s1, const char *s2, size_t n);
-        static const unsigned intSizeInBits = static_cast<unsigned>(sizeof(int) * 8);
-        llvm::Type* nativeIntTy = llvm::Type::getIntNTy(ctx, intSizeInBits);
-        llvm::Type* nativeSizeTy = getNativeSizeType(ctx);
-        module->getOrInsertFunction("strncmp", nativeIntTy,
-                                    charPtrTy, charPtrTy, nativeSizeTy, NULL);
-
-        module->getOrInsertFunction("stringref_get", charPtrTy,
-                                    ptrToStringRefTy, NULL);
-
-        module->getOrInsertFunction("stringref_debug",
-                                    voidTy,
-                                    ptrToStringRefTy,
-                                    NULL);
+        // prototypes for C wrapper functions called from generated code
+        // would be added to the module here.
     }
 
-    namespace {
-
-        bool voltTrace() {
-#if VOLT_LOG_LEVEL<=VOLT_LEVEL_TRACE
-            return true;
-#else
-            return false;
-#endif
-        }
-
-        llvm::Value* getNullValueForType(llvm::Type* ty) {
-            VOLT_TRACE("Entering");
-            if (!ty->isIntegerTy()) {
-                throw UnsupportedForCodegenException("attempt to get null value for non-integer type");
-            }
-
-            llvm::IntegerType* intTy = static_cast<llvm::IntegerType*>(ty);
-            unsigned bitWidth = intTy->getBitWidth();
-            switch (bitWidth) {
-            case 8:
-                return llvm::ConstantInt::get(intTy, INT8_NULL);
-            case 16:
-                return llvm::ConstantInt::get(intTy, INT16_NULL);
-            case 32:
-                return llvm::ConstantInt::get(intTy, INT32_NULL);
-            default:
-                assert (bitWidth == 64);
-                return llvm::ConstantInt::get(intTy, INT64_NULL);
-            }
-        }
-
-
-
-        llvm::Value*
-        getInlinedVarcharLength(llvm::IRBuilder<>& builder, const CGValue& vcVal) {
-            assert(vcVal.isInlinedVarchar());
-
-            // load the first byte
-            llvm::Value* fb = builder.CreateLoad(vcVal.val());
-            const char mask = ~static_cast<char>(OBJECT_NULL_BIT | OBJECT_CONTINUATION_BIT);
-            llvm::Value* len = builder.CreateAnd(fb, mask);
-            len = builder.CreateZExt(len, getNativeSizeType(len->getContext()));
-            return len;
-        }
-
-        llvm::Value* getInlinedVarcharData(llvm::IRBuilder<>& builder, const CGValue& vcVal) {
-            assert(vcVal.isInlinedVarchar());
-            return builder.CreateConstGEP1_32(vcVal.val(), 1);
-        }
-
-        // void callDebugPtr(CodegenContextImpl* cgCtx,
-        //                   llvm::IRBuilder<>& builder,
-        //                   size_t num,
-        //                llvm::Value* val) {
-        //     if (voltTrace()) {
-        //         assert (llvm::isa<llvm::PointerType>(val->getType()));
-
-        //         llvm::Value* casted = builder.CreateBitCast(val, builder.getInt8PtrTy());
-
-        //         llvm::Function* fn = cgCtx->getFunction("codegen_debug_ptr");
-        //         builder.CreateCall2(fn, builder.getInt64(num), casted);
-        //     }
-        // }
-
-        void callDebugSize(CodegenContextImpl* cgCtx,
-                          llvm::IRBuilder<>& builder,
-                          size_t num,
-                       llvm::Value* val) {
-            if (voltTrace()) {
-                assert (val->getType() == getNativeSizeType(val->getContext()));
-                llvm::Function* fn = cgCtx->getFunction("codegen_debug_size");
-                builder.CreateCall2(fn, builder.getInt64(num), val);
-            }
-        }
-
-        // Returns a pointer to the length prefix
-        llvm::Value* getOutlinedVarcharBuffer(CodegenContextImpl* cgCtx,
-                                              llvm::IRBuilder<>& builder,
-                                              const CGValue& vcVal) {
-            throw UnsupportedForCodegenException("Outlined varchar fields are unsupported!");
-            llvm::Function* stringRefGetFn = cgCtx->getFunction("stringref_get");
-            llvm::Value* buffer = builder.CreateCall(stringRefGetFn, vcVal.val(), "outl_vc_buf");
-            return buffer;
-
-            // The following code attempts to inline StringRef::get
-            // It is buggy!
-            //
-            // assert (vcVal.val()->getType() == getPtrToStringRefType(ctx));
-            // callDebug(cgCtx, builder, 50, vcVal.val());
-
-            // // get a pointer StringRef's first field
-            // llvm::Value* ptrToPtrToBuffer = builder.CreateStructGEP(vcVal.val(), 0);
-            // // should be pointer to pointer
-            // assert (ptrToPtrToBuffer->getType() ==
-            //         llvm::PointerType::getUnqual(builder.getInt8PtrTy()));
-            // callDebug(cgCtx, builder, 51, ptrToPtrToBuffer);
-
-            // llvm::Value* ptrToBuffer = builder.CreateLoad(ptrToPtrToBuffer);
-            // assert (ptrToBuffer->getType() == builder.getInt8PtrTy());
-            // callDebug(cgCtx, builder, 52, ptrToBuffer);
-
-            // // Now offset into the buffer past the back pointer.
-            // llvm::Value* skipBackPtr = builder.CreateConstGEP1_64(ptrToBuffer, sizeof(StringRef*));
-            // assert (skipBackPtr->getType() == builder.getInt8PtrTy());
-            // callDebug(cgCtx, builder, 53, skipBackPtr);
-
-            // return skipBackPtr;
-        }
-    }
-
-    ValuePair CGValue::getVarcharLengthAndData(CodegenContextImpl* cgCtx, llvm::IRBuilder<>& builder) const {
+    static llvm::Value* getNullValueForType(llvm::Type* ty) {
         VOLT_TRACE("Entering");
-        if (isInlinedVarchar()) {
-            return std::make_pair(getInlinedVarcharLength(builder, *this),
-                                  getInlinedVarcharData(builder, *this));
+        if (!ty->isIntegerTy()) {
+            throw UnsupportedForCodegenException("attempt to get null value for non-integer type");
         }
 
-        assert(isOutlinedVarchar());
-        llvm::Value* dataBuffer = getOutlinedVarcharBuffer(cgCtx, builder, *this);
-        llvm::LLVMContext &ctx  = dataBuffer->getContext();
-
-        // Now need to skip the length prefix.
-        // The first byte describes how long the prefix is.
-        llvm::IntegerType* int8Ty = llvm::Type::getInt8Ty(ctx);
-        llvm::Value *firstByte = builder.CreateLoad(dataBuffer);
-        llvm::Value *contBit = llvm::ConstantInt::get(int8Ty, OBJECT_CONTINUATION_BIT);
-        llvm::Value *contBitIsSet = builder.CreateAnd(firstByte, contBit);
-        contBitIsSet = builder.CreateICmpNE(contBitIsSet,
-                                            builder.getInt8(0),
-                                            "cont_bit");
-
-        llvm::BasicBlock* currBlock = builder.GetInsertBlock();
-        llvm::BasicBlock* merge = llvm::BasicBlock::Create(ctx, "merge", currBlock->getParent());
-        merge->moveAfter(currBlock);
-
-        llvm::BasicBlock* isLongData = llvm::BasicBlock::Create(ctx, "is_long_data", currBlock->getParent(), merge);
-        llvm::BasicBlock* isShortData = llvm::BasicBlock::Create(ctx, "is_short_data", currBlock->getParent(), merge);
-
-        builder.CreateCondBr(contBitIsSet, isLongData, isShortData);
-
-        const char charMask = ~static_cast<char>(OBJECT_CONTINUATION_BIT | OBJECT_NULL_BIT);
-        const uint32_t i32Mask = 0xffffff3f;
-        VOLT_DEBUG("Here's the i32Mask: %d", i32Mask);
-        builder.SetInsertPoint(isLongData);
-        // load the 32-bit value
-        llvm::Type* int32PtrTy = llvm::Type::getInt32PtrTy(ctx);
-        llvm::Value* bufferInt32 = builder.CreateBitCast(dataBuffer, int32PtrTy);
-        llvm::Value* longLength = builder.CreateLoad(bufferInt32);
-        llvm::Value* wideMask = builder.getInt32(i32Mask);
-
-        // zero-out the meta bits.
-        longLength = builder.CreateAnd(longLength, wideMask);
-
-
-        // llvm::Value* fourBytes = builder.CreateAlloca(builder.getInt8Ty(), builder.getInt8(4));
-        // // populate the four bytes, swapping from original
-        // for (int i = 0; i < 4; ++i) {
-        //     llvm::Value* src = builder.CreateConstGEP1_32(dataBuffer, i);
-        //     llvm::Value* byte = builder.CreateLoad(src);
-        //     if (i == 0) {
-        //         byte = builder.CreateAnd(byte, builder.getInt8(mask));
-        //     }
-        //     llvm::Value* dst = builder.CreateConstGEP1_32(fourBytes, 3 - i);
-        //     builder.CreateStore(byte, dst);
-        // }
-
-        // VOLT_DEBUG("fourBytes type: %s", debugLlvm(fourBytes->getType()).c_str());
-        // llvm::Value* longLengthPtr = builder.CreateBitCast(fourBytes, int32PtrTy);
-        // llvm::Value* longLength = builder.CreateLoad(longLengthPtr);
-        llvm::Function *bswapFn = llvm::Intrinsic::getDeclaration(cgCtx->getModule(),
-                                                                  llvm::Intrinsic::bswap,
-                                                                  std::vector<llvm::Type*>(1, builder.getInt32Ty()));
-        assert(bswapFn != NULL);
-        longLength = builder.CreateCall(bswapFn, longLength);
-        longLength = builder.CreateZExt(longLength, getNativeSizeType(ctx));
-        llvm::Value* longData = builder.CreateConstGEP1_32(dataBuffer, LONG_OBJECT_LENGTHLENGTH);
-        builder.CreateBr(merge);
-
-        builder.SetInsertPoint(isShortData);
-        llvm::Value* shortLength = builder.CreateAnd(firstByte, builder.getInt8(charMask));
-        shortLength = builder.CreateZExt(shortLength, getNativeSizeType(ctx));
-        llvm::Value* shortData = builder.CreateConstGEP1_32(dataBuffer, SHORT_OBJECT_LENGTHLENGTH);
-        builder.CreateBr(merge);
-
-        builder.SetInsertPoint(merge);
-        llvm::PHINode* len = builder.CreatePHI(getNativeSizeType(ctx), 2);
-        len->addIncoming(longLength, isLongData);
-        len->addIncoming(shortLength, isShortData);
-        llvm::PHINode* data = builder.CreatePHI(builder.getInt8PtrTy(), 2);
-        data->addIncoming(longData, isLongData);
-        data->addIncoming(shortData, isShortData);
-
-        return std::make_pair(len, data);
-    }
-
-    // Used by project node to do memcpy
-    llvm::Value* CGValue::getInlinedVarcharTotalLength(llvm::IRBuilder<>& builder) const {
-        assert(isInlinedVarchar());
-        llvm::Value* dataLen = getInlinedVarcharLength(builder, *this);
-        llvm::Value* shortLengthLength = llvm::ConstantInt::get(getNativeSizeType(dataLen->getContext()),
-                                                                SHORT_OBJECT_LENGTHLENGTH);
-        llvm::Value* totalLen = builder.CreateAdd(dataLen, shortLengthLength);
-        return totalLen;
+        llvm::IntegerType* intTy = static_cast<llvm::IntegerType*>(ty);
+        unsigned bitWidth = intTy->getBitWidth();
+        switch (bitWidth) {
+        case 8:
+            return llvm::ConstantInt::get(intTy, INT8_NULL);
+        case 16:
+            return llvm::ConstantInt::get(intTy, INT16_NULL);
+        case 32:
+            return llvm::ConstantInt::get(intTy, INT32_NULL);
+        default:
+            assert (bitWidth == 64);
+            return llvm::ConstantInt::get(intTy, INT64_NULL);
+        }
     }
 
     ExprGenerator::ExprGenerator(CodegenContextImpl* codegenContext,
@@ -328,12 +100,6 @@ namespace voltdb {
             return llvm::Type::getInt64Ty(ctx);
         case VALUE_TYPE_BOOLEAN:
             return llvm::Type::getInt8Ty(ctx);
-        case VALUE_TYPE_VARCHAR:
-        case VALUE_TYPE_VARBINARY:
-            if (cgVoltType.isInlined())
-                return llvm::Type::getInt8Ty(ctx);
-            else
-                return getPtrToStringRefType(ctx);
         default: {
             std::ostringstream oss;
             oss << "expression with type " << valueToString(cgVoltType.ty());
@@ -393,119 +159,15 @@ namespace voltdb {
         // Cast addr from char* to the appropriate pointer type
         // An LLVM IR instruction is created but it will be a no-op on target
         CGVoltType cgVoltType(getExprType(expr), columnInfo->inlined);
-        if (cgVoltType.isInlinedVarchar()) {
-            VOLT_TRACE("Exiting---inlined varchar");
-            // just leave it as a pointer to char!
-
-            return CGValue(addr, columnInfo->allowNull, cgVoltType);
-        }
 
         llvm::Type* ptrTy = llvm::PointerType::getUnqual(getLlvmType(ctx, cgVoltType));
         llvm::Value* castedAddr = builder().CreateBitCast(addr,
                                                           ptrTy);
         std::ostringstream varName;
         varName << "field_" << expr->getColumnId();
-            VOLT_TRACE("Exiting---numeric type");
+        VOLT_TRACE("Exiting---numeric type");
         return CGValue(builder().CreateLoad(castedAddr, varName.str().c_str()),
                        columnInfo->allowNull, cgVoltType);
-    }
-
-    llvm::Function* ExprGenerator::getExtFn(const std::string& fnName) {
-        //VOLT_DEBUG("Getting external function: %s", fnName.c_str());
-        return m_codegenContext->getFunction(fnName);
-    }
-
-    llvm::Value*
-    ExprGenerator::codegenCmpVarchar(ExpressionType exprType,
-                                     const CGValue& lhs,
-                                     const CGValue& rhs) {
-        VOLT_TRACE("Entering");
-        llvm::LLVMContext& ctx = lhs.val()->getContext();
-
-        ValuePair lhsLenData = lhs.getVarcharLengthAndData(m_codegenContext, builder());
-        ValuePair rhsLenData = rhs.getVarcharLengthAndData(m_codegenContext, builder());
-        llvm::Value* lhsLen = lhsLenData.first;
-        llvm::Value* rhsLen = rhsLenData.first;
-        llvm::Value* lhsData = lhsLenData.second;
-        llvm::Value* rhsData = rhsLenData.second;
-        lhsLen->setName("vc_lhs_len");
-        rhsLen->setName("vc_rhs_len");
-        lhsData->setName("vc_lhs_data");
-        rhsData->setName("vc_rhs_data");
-
-        callDebugSize(m_codegenContext, builder(), 100, lhsLen);
-        callDebugSize(m_codegenContext, builder(), 101, rhsLen);
-
-        llvm::Value* lenDiff = builder().CreateSub(lhsLen, rhsLen, "len_diff");
-        callDebugSize(m_codegenContext, builder(), 102, lenDiff);
-
-        llvm::Value* lhsShorter = builder().CreateICmpSLT(lenDiff,
-                                                          getZeroValue(lenDiff->getType()),
-                                                          "lhs_shorter");
-        llvm::Value* shorterLen = builder().CreateSelect(lhsShorter, lhsLen, rhsLen);
-        assert (shorterLen->getType() == getNativeSizeType(ctx));
-        // shorterLen = builder().CreateSExtOrBitCast(shorterLen,
-        //                                            getNativeSizeType(ctx),
-        //                                            "min_len");
-        // now call strncmp(lhs, rhs, shorterLen);
-        llvm::Value* strncmpResult = builder().CreateCall3(getExtFn("strncmp"),
-                                                           lhsData,
-                                                           rhsData,
-                                                           shorterLen,
-                                                           "strncmp_result");
-        strncmpResult = builder().CreateSExt(strncmpResult, lenDiff->getType());
-
-        callDebugSize(m_codegenContext, builder(), 103, strncmpResult);
-
-        llvm::Value* zero = getZeroValue(strncmpResult->getType());
-        llvm::Value* cmpResultIsZero = builder().CreateICmpEQ(strncmpResult,
-                                                              zero,
-                                                              "strncmp_result_zero");
-        // If strncmpResult (strcmp's output) is zero, then the result of the comparison
-        // is the length difference.
-        VOLT_DEBUG("lenDiff type: %s", debugLlvm(lenDiff->getType()).c_str());
-        VOLT_DEBUG("strncmpResult type: %s", debugLlvm(strncmpResult->getType()).c_str());
-
-        llvm::Value* result = builder().CreateSelect(cmpResultIsZero,
-                                                     lenDiff,
-                                                     strncmpResult, "lex_order");
-        VOLT_DEBUG("result type: %s", debugLlvm(result->getType()).c_str());
-        callDebugSize(m_codegenContext, builder(), 104, result);
-
-        // result now tells is whether lhs comes before rhs
-        //   and is pos, zero, or neg
-
-        // Now translate to true or false, based on the exprType
-        llvm::Value* answer;
-        switch (exprType) {
-        case EXPRESSION_TYPE_COMPARE_EQUAL:
-            answer =  builder().CreateICmpEQ(result, zero);
-            break;
-        case EXPRESSION_TYPE_COMPARE_NOTEQUAL:
-            answer =  builder().CreateICmpNE(result, zero);
-            break;
-        case EXPRESSION_TYPE_COMPARE_LESSTHAN:
-            answer =  builder().CreateICmpSLT(result, zero);
-            break;
-        case EXPRESSION_TYPE_COMPARE_GREATERTHAN:
-            answer =  builder().CreateICmpSGT(result, zero);
-            break;
-        case EXPRESSION_TYPE_COMPARE_LESSTHANOREQUALTO:
-            answer =  builder().CreateICmpSLE(result, zero);
-            break;
-        case EXPRESSION_TYPE_COMPARE_GREATERTHANOREQUALTO:
-            answer =  builder().CreateICmpSGE(result, zero);
-            break;
-        default: {
-            std::string msg = "varchar compare with op ";
-            msg += expressionToString(exprType);
-            throw UnsupportedForCodegenException(msg);
-        }
-        }
-
-        // Widen the i1 to i8
-        answer = builder().CreateZExt(answer, llvm::Type::getInt8Ty(ctx), "vc_cmp_result");
-        return answer;
     }
 
     llvm::Value*
@@ -514,13 +176,6 @@ namespace voltdb {
                                 const CGValue& lhs,
                                 const CGValue& rhs) {
         VOLT_TRACE("Entering");
-
-        if (lhs.isVarchar()) {
-            // find the shorter string.
-            // invoke strncmp(lhs, rhs, shorterLen)
-            // return comparison with return code
-            return codegenCmpVarchar(exprType, lhs, rhs);
-        }
 
         llvm::Value* lhsv = lhs.val();
         llvm::Value* rhsv = rhs.val();
@@ -575,26 +230,7 @@ namespace voltdb {
     llvm::Value*
     ExprGenerator::compareToNull(const CGValue& cgVal) {
         // For floating point types, we would CreateFCmp* here instead...
-        if (cgVal.isInlinedVarchar()) {
-            VOLT_DEBUG("Generating null compare for inlined varchar");
-            // Check the OBJECT_NULL_BIT in the first byte.
-            llvm::Value* firstByte = builder().CreateLoad(cgVal.val());
-            llvm::Value* andWithNullBit = builder().CreateAnd(firstByte, OBJECT_NULL_BIT);
-            return builder().CreateICmpNE(andWithNullBit, getFalseValue(), "vc_is_null");
-        }
-        else if (cgVal.isOutlinedVarchar()) {
-            VOLT_DEBUG("Generating null compare for outlined varchar");
-
-            llvm::Value* asInt = builder().CreatePtrToInt(cgVal.val(), builder().getInt64Ty());
-            return builder().CreateICmpEQ(asInt, builder().getInt64(0));
-
-            // llvm::PointerType* pty = llvm::dyn_cast<llvm::PointerType>(cgVal.val()->getType());
-            // return builder().CreateICmpNE(cgVal.val(),
-            //                               llvm::ConstantPointerNull::get(pty));
-        }
-        else {
-            return builder().CreateICmpEQ(cgVal.val(), getNullValueForType(cgVal.val()->getType()));
-        }
+        return builder().CreateICmpEQ(cgVal.val(), getNullValueForType(cgVal.val()->getType()));
     }
 
     llvm::BasicBlock*
@@ -710,13 +346,6 @@ namespace voltdb {
     std::pair<CGValue, CGValue> ExprGenerator::homogenizeTypes(const CGValue& lhs,
                                                                const CGValue& rhs) {
         VOLT_TRACE("Entering");
-        if (lhs.isVarchar() != rhs.isVarchar()) {
-            throw UnsupportedForCodegenException("Heterogenous compare with varchar");
-        }
-        else if (lhs.isVarchar()) {
-            return std::make_pair(lhs, rhs);
-        }
-
         llvm::IntegerType* lhsTy = llvm::dyn_cast<llvm::IntegerType>(lhs.val()->getType());
         llvm::IntegerType* rhsTy = llvm::dyn_cast<llvm::IntegerType>(rhs.val()->getType());
 
@@ -833,21 +462,9 @@ namespace voltdb {
                            true, vt);
         }
 
-        if (vt != VALUE_TYPE_VARCHAR) {
-            llvm::Value* k = llvm::ConstantInt::get(ty,
-                                                    ValuePeeker::peekAsBigInt(nval));
-            return CGValue(k, false, vt); // never null if we get here.
-        }
-        else {
-            // grab the pointer to the string ref
-            NValue* pNVal = &nval;
-            StringRef** ppStringRef = reinterpret_cast<StringRef**>(pNVal);
-            StringRef* pStringRef = *ppStringRef;
-            llvm::Value* v = llvm::ConstantInt::get(getIntPtrType(),
-                                                 (uintptr_t)pStringRef);
-            v = builder().CreateIntToPtr(v, getPtrToStringRefType(getLlvmContext()));
-            return CGValue(v, false, vt);
-        }
+        llvm::Value* k = llvm::ConstantInt::get(ty,
+                                                ValuePeeker::peekAsBigInt(nval));
+        return CGValue(k, false, vt); // never null if we get here.
     }
 
     CGValue
