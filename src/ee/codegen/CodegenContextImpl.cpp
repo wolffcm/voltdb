@@ -17,16 +17,19 @@
 
 // Uncomment this to get informative debug messages
 // regarding codegen
-//
-// #ifdef VOLT_LOG_LEVEL
-// #undef VOLT_LOG_LEVEL
-// #endif
 
-// #define VOLT_LOG_LEVEL VOLT_LEVEL_DEBUG
+#ifdef VOLT_LOG_LEVEL
+#undef VOLT_LOG_LEVEL
+#endif
+
+#define VOLT_LOG_LEVEL VOLT_LEVEL_DEBUG
+
+#include <pthread.h>
 
 #include "codegen/CodegenContextImpl.hpp"
 #include "codegen/ExprGenerator.hpp"
 #include "codegen/PredFnGenerator.hpp"
+#include "common/FixUnusedAssertHack.h"
 #include "common/SQLException.h"
 #include "common/TupleSchema.h"
 #include "common/debuglog.h"
@@ -58,16 +61,21 @@
 
 #include "boost/timer.hpp"
 
-static pthread_once_t llvmNativeTargetInitialized = PTHREAD_ONCE_INIT;
-
-static void initializeNativeTarget() {
-    bool success = llvm::llvm_start_multithreaded();
-    (void)success;
-    assert(success);
-    llvm::InitializeNativeTarget();
-}
-
 namespace voltdb {
+
+    void CodegenContextImpl::startLlvm() {
+
+        // Both of these calls must happen just once for the whole process.
+
+        bool success = llvm::llvm_start_multithreaded();
+        (void)success;
+        assert(success);
+        llvm::InitializeNativeTarget();
+    }
+
+    void CodegenContextImpl::shutdownLlvm() {
+        llvm::llvm_shutdown();
+    }
 
     llvm::StructType* getTableTupleType(llvm::LLVMContext &ctx) {
         llvm::Type* ptrToCharTy = llvm::Type::getInt8PtrTy(ctx);
@@ -116,46 +124,11 @@ namespace voltdb {
         }
 } // end namespace voltdb
 
-extern "C" {
-
-    // These are C wrappers for functions called from
-    // generated code
-
-    void codegen_debug_ptr(size_t i64Num, void* ptr) {
-        VOLT_TRACE("---");
-        VOLT_TRACE("  Here's a number: %ld", i64Num);
-        VOLT_TRACE("  Here's a pointer: %p", ptr);
-    }
-
-    void codegen_debug_size(size_t i64Num, size_t data) {
-        VOLT_TRACE("---");
-        VOLT_TRACE("  Here's a number: %ld", i64Num);
-        VOLT_TRACE("  Here's a size_t as a signed number: %ld", data);
-    }
-} // end extern "C" definitions
-
 namespace voltdb { namespace {
 
         // Add the extern "C" functions above to the module
         void addPrototypes(llvm::Module* module) {
-
             ExprGenerator::addExternalPrototypes(module);
-
-            llvm::LLVMContext& ctx = module->getContext();
-            llvm::Type* charPtrTy = llvm::Type::getInt8PtrTy(ctx);
-            llvm::Type* voidTy = llvm::Type::getVoidTy(ctx);
-
-            module->getOrInsertFunction("codegen_debug_ptr",
-                                        voidTy,
-                                        getNativeSizeType(ctx),
-                                        charPtrTy,
-                                        NULL);
-
-            module->getOrInsertFunction("codegen_debug_size",
-                                        voidTy,
-                                        getNativeSizeType(ctx),
-                                        getNativeSizeType(ctx),
-                                        NULL);
         }
 
     } // end anonymous namespace
@@ -168,8 +141,9 @@ namespace voltdb { namespace {
         , m_errorString()
         , m_externalTypesMap()
     {
-        // This really only needs to be called once for the whole process.
-        (void) pthread_once(&llvmNativeTargetInitialized, initializeNativeTarget);
+        // This llvm_start_multithreaded() must have been called
+        // before we get here.
+        assert(llvm::llvm_is_multithreaded());
 
         m_llvmContext.reset(new llvm::LLVMContext());
 
@@ -309,9 +283,5 @@ namespace voltdb { namespace {
         }
 
         return (PredFunction)generateCode(predFnGenerator.getFunction());
-    }
-
-    void CodegenContextImpl::shutdownLlvm() {
-        llvm::llvm_shutdown();
     }
 }

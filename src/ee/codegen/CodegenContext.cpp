@@ -38,4 +38,8 @@ namespace voltdb {
     void CodegenContext::shutdownLlvm() {
         CodegenContextImpl::shutdownLlvm();
     }
+
+    void CodegenContext::startLlvm() {
+        CodegenContextImpl::startLlvm();
+    }
 }

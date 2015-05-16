@@ -70,6 +70,7 @@ namespace voltdb {
 
         ~CodegenContextImpl();
 
+        static void startLlvm();
         static void shutdownLlvm();
 
     private:

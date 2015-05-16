@@ -32,7 +32,6 @@ static pthread_once_t static_keyOnce = PTHREAD_ONCE_INIT;
 
 static void createThreadLocalKey() {
     (void)pthread_key_create( &static_key, NULL);
-    CodegenContext::startLlvm();
 }
 
 ExecutorContext::ExecutorContext(int64_t siteId,
@@ -56,7 +55,7 @@ ExecutorContext::ExecutorContext(int64_t siteId,
     m_engine(engine),
     m_txnId(0),
     m_spHandle(0),
-    m_codegenContext(NULL),
+    m_codegenContext(new CodegenContext()),
     m_lastCommittedSpHandle(0),
     m_siteId(siteId),
     m_partitionId(partitionId),
@@ -66,23 +65,20 @@ ExecutorContext::ExecutorContext(int64_t siteId,
 {
     (void)pthread_once(&static_keyOnce, createThreadLocalKey);
     bindToThread();
-
-    // This must happen after createThreadLocalKey is called.
-    m_codegenContext = new CodegenContext();
 }
 
 ExecutorContext::~ExecutorContext() {
     // currently does not own any of its pointers
     // execpt for the CodegenContext
     delete m_codegenContext;
-    //    CodegenContext::shutdownLlvm();
+    CodegenContext::shutdownLlvm();
 
     // There can be only one (per thread).
     assert(pthread_getspecific( static_key) == this);
     // ... or none, now that the one is going away.
     VOLT_DEBUG("De-installing EC(%ld)", (long)this);
 
-    pthread_setspecific( static_key, NULL);
+    pthread_setspecific(static_key, NULL);
 }
 
 void ExecutorContext::bindToThread()
@@ -96,7 +92,7 @@ void ExecutorContext::bindToThread()
 
 ExecutorContext* ExecutorContext::getExecutorContext() {
     (void)pthread_once(&static_keyOnce, createThreadLocalKey);
-    return static_cast<ExecutorContext*>(pthread_getspecific( static_key));
+    return static_cast<ExecutorContext*>(pthread_getspecific(static_key));
 }
 
 PredFunction ExecutorContext::compilePredicate(const std::string& fnName,
@@ -105,11 +101,20 @@ PredFunction ExecutorContext::compilePredicate(const std::string& fnName,
     return m_codegenContext->compilePredicate(fnName, tupleSchema, expr);
 }
 
+<<<<<<< HEAD
+PlanNodeFunction ExecutorContext::compilePlanNode(AbstractExecutor* executor) {
+    return m_codegenContext->compilePlanNode(executor);
+}
+
 Table* ExecutorContext::executeExecutors(int subqueryId) const
 {
     const std::vector<AbstractExecutor*>& executorList = getExecutors(subqueryId);
     return executeExecutors(executorList, subqueryId);
 }
+=======
+
+        }
+>>>>>>> 8cf368e... Remove plan node generation
 
 Table* ExecutorContext::executeExecutors(const std::vector<AbstractExecutor*>& executorList,
                                          int subqueryId) const
@@ -155,7 +160,7 @@ Table* ExecutorContext::executeExecutors(const std::vector<AbstractExecutor*>& e
                 AbstractPlanNode *inlineNode = it->second;
                 inlineNode->getExecutor()->cleanupMemoryPool();
             }
-}
+        }
 
         if (subqueryId == 0) {
             VOLT_TRACE("The Executor's execution at position '%d' failed", ctr);
