@@ -303,6 +303,7 @@ enum ExpressionType {
     EXPRESSION_TYPE_AGGREGATE_MIN                   = 43,
     EXPRESSION_TYPE_AGGREGATE_MAX                   = 44,
     EXPRESSION_TYPE_AGGREGATE_AVG                   = 45,
+    EXPRESSION_TYPE_AGGREGATE_APPROX_COUNT_DISTINCT = 46,
 
     // -----------------------------
     // Functions

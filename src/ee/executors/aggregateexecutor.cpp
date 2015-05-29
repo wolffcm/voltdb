@@ -340,6 +340,25 @@ private:
     Pool* m_memoryPool;
 };
 
+class ApproxCountDistinctAgg : public Agg{
+public:
+    ApproxCountDistinctAgg()
+    {
+    }
+
+    virtual void advance(const NValue& val)
+    {
+    }
+
+    virtual NValue finalize(ValueType type)
+    {
+        m_value = ValueFactory::getDoubleValue(0.0);
+        return m_value;
+    }
+
+private:
+};
+
 /*
  * Create an instance of an aggregator for the specified aggregate type and "distinct" flag.
  * The object is allocated from the provided memory pool.
@@ -368,6 +387,8 @@ inline Agg* getAggInstance(Pool& memoryPool, ExpressionType agg_type, bool isDis
             return new (memoryPool) AvgAgg<Distinct>();
         }
         return new (memoryPool) AvgAgg<NotDistinct>();
+    case EXPRESSION_TYPE_AGGREGATE_APPROX_COUNT_DISTINCT:
+        return new (memoryPool) ApproxCountDistinctAgg();
     default:
     {
         char message[128];

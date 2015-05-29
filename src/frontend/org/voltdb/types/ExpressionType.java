@@ -113,6 +113,7 @@ public enum ExpressionType {
     AGGREGATE_MIN                 (AggregateExpression.class, 43, "MIN"),
     AGGREGATE_MAX                 (AggregateExpression.class, 44, "MAX"),
     AGGREGATE_AVG                 (AggregateExpression.class, 45, "AVG"),
+    AGGREGATE_APPROX_COUNT_DISTINCT(AggregateExpression.class, 46, "APPROX_COUNT_DISTINCT"),
 
     // ----------------------------
     // Function

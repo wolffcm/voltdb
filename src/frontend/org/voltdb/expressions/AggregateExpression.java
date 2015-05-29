@@ -73,6 +73,10 @@ public class AggregateExpression extends AbstractExpression {
             m_valueType = VoltType.BIGINT;
             m_valueSize = m_valueType.getLengthInBytesForFixedTypes();
             break;
+        case AGGREGATE_APPROX_COUNT_DISTINCT:
+            m_valueType = VoltType.FLOAT;
+            m_valueSize = m_valueType.getLengthInBytesForFixedTypes();
+            break;
         case AGGREGATE_AVG:
         case AGGREGATE_MAX:
         case AGGREGATE_MIN:

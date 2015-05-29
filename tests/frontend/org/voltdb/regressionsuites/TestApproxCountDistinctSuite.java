@@ -26,6 +26,7 @@ package org.voltdb.regressionsuites;
 import java.io.IOException;
 
 import org.voltdb.BackendTarget;
+import org.voltdb.VoltTable;
 import org.voltdb.client.Client;
 import org.voltdb.compiler.VoltProjectBuilder;
 
@@ -35,7 +36,11 @@ public class TestApproxCountDistinctSuite extends RegressionSuite {
     {
         Client client = getClient();
 
-        client.callProcedure("@AdHoc", "select approx_count_distinct(bi) from t;");
+        VoltTable vt = client.callProcedure("@AdHoc", "select approx_count_distinct(bi) from t;")
+                .getResults()[0];
+        assertTrue(vt.advanceRow());
+        assertEquals(0.0, vt.getDouble(0));
+        assertFalse(vt.advanceRow());
     }
 
     public TestApproxCountDistinctSuite(String name) {

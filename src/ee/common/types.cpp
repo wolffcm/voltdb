@@ -557,6 +557,9 @@ string expressionToString(ExpressionType type)
     case EXPRESSION_TYPE_AGGREGATE_COUNT_STAR: {
         return "AGGREGATE_COUNT_STAR";
     }
+    case EXPRESSION_TYPE_AGGREGATE_APPROX_COUNT_DISTINCT: {
+        return "AGGREGATE_APPROX_COUNT_DISTINCT";
+    }
     case EXPRESSION_TYPE_AGGREGATE_SUM: {
         return "AGGREGATE_SUM";
     }
@@ -654,6 +657,8 @@ ExpressionType stringToExpression(string str )
         return EXPRESSION_TYPE_AGGREGATE_COUNT;
     } else if (str == "AGGREGATE_COUNT_STAR") {
         return EXPRESSION_TYPE_AGGREGATE_COUNT_STAR;
+    } else if (str == "AGGREGATE_APPROX_COUNT_DISTINCT") {
+        return EXPRESSION_TYPE_AGGREGATE_APPROX_COUNT_DISTINCT;
     } else if (str == "AGGREGATE_SUM") {
         return EXPRESSION_TYPE_AGGREGATE_SUM;
     } else if (str == "AGGREGATE_MIN") {
