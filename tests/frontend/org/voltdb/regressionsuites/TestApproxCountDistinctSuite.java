@@ -24,6 +24,7 @@
 package org.voltdb.regressionsuites;
 
 import java.io.IOException;
+import java.util.Random;
 
 import org.voltdb.BackendTarget;
 import org.voltdb.VoltTable;
@@ -32,15 +33,32 @@ import org.voltdb.compiler.VoltProjectBuilder;
 
 public class TestApproxCountDistinctSuite extends RegressionSuite {
 
-    public void testEmpty() throws Exception
+    public void testSimple() throws Exception
     {
         Client client = getClient();
 
-        VoltTable vt = client.callProcedure("@AdHoc", "select approx_count_distinct(bi) from t;")
+        VoltTable vt = client.callProcedure("@AdHoc", "select approx_count_distinct(bi) from r;")
                 .getResults()[0];
         assertTrue(vt.advanceRow());
         assertEquals(0.0, vt.getDouble(0));
         assertFalse(vt.advanceRow());
+
+        Random r = new Random(777);
+        for (int i = 0; i < 1000; ++i) {
+            double d = r.nextGaussian();
+            while (d > Long.MAX_VALUE || d <= Long.MIN_VALUE) {
+                d = r.nextGaussian();
+            }
+            long val = (long) d;
+            client.callProcedure("@AdHoc", "insert into r values (" +  val + ")");
+        }
+
+        System.out.println("Finished filling table!");
+
+        vt = client.callProcedure("@AdHoc",
+                "select approx_count_distinct(bi), count(distinct bi)  from r;")
+                .getResults()[0];
+        System.out.println(vt);
     }
 
     public TestApproxCountDistinctSuite(String name) {
@@ -53,7 +71,7 @@ public class TestApproxCountDistinctSuite extends RegressionSuite {
         MultiConfigSuiteBuilder builder = new MultiConfigSuiteBuilder(TestApproxCountDistinctSuite.class);
         VoltProjectBuilder project = new VoltProjectBuilder();
         final String literalSchema =
-                "CREATE TABLE t ( " +
+                "CREATE TABLE r ( " +
                         "bi bigint " +
                         ");"
                         ;

@@ -57,6 +57,7 @@
 
 #include "boost/foreach.hpp"
 #include "boost/unordered_map.hpp"
+#include "hyperloglog/hyperloglog.hpp" // for APPROX_COUNT_DISTINCT
 
 #include <algorithm>
 #include <limits>
@@ -340,23 +341,71 @@ private:
     Pool* m_memoryPool;
 };
 
-class ApproxCountDistinctAgg : public Agg{
+class ApproxCountDistinctAgg : public Agg {
 public:
     ApproxCountDistinctAgg()
+        : m_hyperLogLog(REGISTER_BIT_WIDTH)
     {
     }
 
     virtual void advance(const NValue& val)
     {
+        if (val.isNull()) {
+            return;
+        }
+
+        ValueType vt = ValuePeeker::peekValueType(val);
+
+        char* elem = NULL;
+        uint32_t len = 0;
+
+        double doubleVal;
+        int64_t bigintVal;
+        TTInt decimalVal;
+
+        switch (vt) {
+        case VALUE_TYPE_TINYINT:
+        case VALUE_TYPE_SMALLINT:
+        case VALUE_TYPE_INTEGER:
+        case VALUE_TYPE_BIGINT:
+        case VALUE_TYPE_TIMESTAMP:
+        case VALUE_TYPE_BOOLEAN:
+            bigintVal = ValuePeeker::peekAsRawInt64(val);
+            elem = reinterpret_cast<char*>(&bigintVal);
+            len = sizeof(bigintVal);
+            break;
+
+        case VALUE_TYPE_DOUBLE:
+            doubleVal = ValuePeeker::peekDouble(val);
+            elem = reinterpret_cast<char*>(&doubleVal);
+            len = sizeof(doubleVal);
+            break;
+
+        case VALUE_TYPE_DECIMAL:
+            decimalVal = ValuePeeker::peekDecimal(val);
+            elem = reinterpret_cast<char*>(&decimalVal);
+            len = sizeof(decimalVal);
+            break;
+
+        default:
+            assert(false);
+        }
+
+        m_hyperLogLog.add(elem, len);
     }
 
     virtual NValue finalize(ValueType type)
     {
-        m_value = ValueFactory::getDoubleValue(0.0);
+        m_value = ValueFactory::getDoubleValue(m_hyperLogLog.estimate());
         return m_value;
     }
 
 private:
+
+    // This value is suitable for estimating cardinality for
+    // multisets where elements have 128 bits.
+    static const uint8_t REGISTER_BIT_WIDTH = 7;
+    hll::HyperLogLog m_hyperLogLog;
 };
 
 /*
