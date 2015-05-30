@@ -89,7 +89,7 @@ public class TestApproxCountDistinctSuite extends RegressionSuite {
         System.out.println("Finished filling table!");
 
         vt = client.callProcedure("@AdHoc",
-                "select approx_count_distinct(bi), count(distinct bi)  from p;")
+                "select approx_count_distinct(bi) from p;")
                 .getResults()[0];
         System.out.println(vt);
     }
@@ -122,6 +122,11 @@ public class TestApproxCountDistinctSuite extends RegressionSuite {
         boolean success;
 
         config = new LocalCluster("testApproxCountDistinctSuite-onesite.jar", 2, 1, 0, BackendTarget.NATIVE_EE_JNI);
+        success = config.compile(project);
+        assert(success);
+        builder.addServerConfig(config);
+
+        config = new LocalCluster("testApproxCountDistinctSuite-onesite.jar", 1, 1, 0, BackendTarget.NATIVE_EE_JNI);
         success = config.compile(project);
         assert(success);
         builder.addServerConfig(config);
