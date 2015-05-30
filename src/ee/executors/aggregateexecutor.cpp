@@ -62,6 +62,7 @@
 #include <algorithm>
 #include <limits>
 #include <set>
+#include <sstream>
 #include <stdint.h>
 #include <utility>
 
@@ -400,10 +401,20 @@ public:
         return m_value;
     }
 
+protected:
+    hll::HyperLogLog& hyperLogLog() {
+        return m_hyperLogLog;
+    }
+
+    static uint8_t registerBitWidth() {
+        return REGISTER_BIT_WIDTH;
+    }
+
 private:
 
     // This value is suitable for estimating cardinality for
     // multisets where elements have 128 bits.
+    // (I.e., everything except VARCHAR and VARBINARY)
     static const uint8_t REGISTER_BIT_WIDTH = 7;
     hll::HyperLogLog m_hyperLogLog;
 };
@@ -413,7 +424,12 @@ public:
     virtual NValue finalize(ValueType type)
     {
         assert (type == VALUE_TYPE_VARBINARY);
-        return ValueFactory::getTempBinaryValue("deadbeef");
+        // serialize the hyperloglog as varbinary, to send to
+        // coordinator.
+        std::ostringstream oss;
+        hyperLogLog().dump(oss);
+        std::cout << "serializing hll with size " << oss.str().length() << "!\n";
+        return ValueFactory::getTempBinaryValue(oss.str().c_str(), oss.str().length());
     }
 };
 
@@ -422,9 +438,17 @@ public:
     virtual void advance(const NValue& val)
     {
         assert (ValuePeeker::peekValueType(val) == VALUE_TYPE_VARBINARY);
-        if (val.isNull()) {
-            return;
-        }
+        assert (!val.isNull());
+
+        int32_t len = ValuePeeker::peekObjectLength_withoutNull(val);
+        char* data = static_cast<char*>(ValuePeeker::peekObjectValue_withoutNull(val));
+        assert (len > 0);
+        std::cout << "deserializing hll with size " << len << "!\n";
+        std::istringstream iss(data, static_cast<size_t>(len));
+
+        hll::HyperLogLog distHll(registerBitWidth());
+        distHll.restore(iss);
+        hyperLogLog().merge(distHll);
     }
 };
 
