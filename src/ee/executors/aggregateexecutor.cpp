@@ -408,6 +408,26 @@ private:
     hll::HyperLogLog m_hyperLogLog;
 };
 
+class ValsToHyperLogLogAgg : public ApproxCountDistinctAgg {
+public:
+    virtual NValue finalize(ValueType type)
+    {
+        assert (type == VALUE_TYPE_VARBINARY);
+        return ValueFactory::getTempBinaryValue("deadbeef");
+    }
+};
+
+class HyperLogLogsToCardAgg : public ApproxCountDistinctAgg {
+public:
+    virtual void advance(const NValue& val)
+    {
+        assert (ValuePeeker::peekValueType(val) == VALUE_TYPE_VARBINARY);
+        if (val.isNull()) {
+            return;
+        }
+    }
+};
+
 /*
  * Create an instance of an aggregator for the specified aggregate type and "distinct" flag.
  * The object is allocated from the provided memory pool.
@@ -438,6 +458,10 @@ inline Agg* getAggInstance(Pool& memoryPool, ExpressionType agg_type, bool isDis
         return new (memoryPool) AvgAgg<NotDistinct>();
     case EXPRESSION_TYPE_AGGREGATE_APPROX_COUNT_DISTINCT:
         return new (memoryPool) ApproxCountDistinctAgg();
+    case EXPRESSION_TYPE_AGGREGATE_VALS_TO_HYPERLOGLOG:
+        return new (memoryPool) ValsToHyperLogLogAgg();
+    case EXPRESSION_TYPE_AGGREGATE_HYPERLOGLOGS_TO_CARD:
+        return new (memoryPool) HyperLogLogsToCardAgg();
     default:
     {
         char message[128];
