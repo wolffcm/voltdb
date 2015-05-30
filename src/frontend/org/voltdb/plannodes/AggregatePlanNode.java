@@ -86,6 +86,10 @@ public class AggregatePlanNode extends AbstractPlanNode {
         return PlanNodeType.AGGREGATE;
     }
 
+    public List<ExpressionType> getAggregateTypes() {
+        return m_aggregateTypes;
+    }
+
     @Override
     public void validate() throws Exception {
         super.validate();

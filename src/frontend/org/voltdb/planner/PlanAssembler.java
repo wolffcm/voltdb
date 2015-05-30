@@ -1857,20 +1857,6 @@ public class PlanAssembler {
         return true;
     }
 
-    private static ExpressionType getTopAggExprType(ExpressionType distAggExprType) {
-        switch (distAggExprType) {
-        case AGGREGATE_COUNT:
-        case AGGREGATE_COUNT_STAR:
-        case AGGREGATE_SUM:
-            return ExpressionType.AGGREGATE_SUM;
-        case AGGREGATE_APPROX_COUNT_DISTINCT:
-            return ExpressionType.AGGREGATE_SUM;
-        default:
-            assert(false);
-        }
-        return ExpressionType.INVALID;
-    }
-
     private AbstractPlanNode handleAggregationOperators(AbstractPlanNode root) {
         AggregatePlanNode aggNode = null;
 
@@ -1975,8 +1961,7 @@ public class PlanAssembler {
                          * count() and sum() when not group by partition column.
                          */
                         if (agg_expression_type == ExpressionType.AGGREGATE_COUNT_STAR ||
-                                agg_expression_type == ExpressionType.AGGREGATE_COUNT ||
-                                agg_expression_type == ExpressionType.AGGREGATE_APPROX_COUNT_DISTINCT ||
+                            agg_expression_type == ExpressionType.AGGREGATE_COUNT ||
                             agg_expression_type == ExpressionType.AGGREGATE_SUM) {
                             if (is_distinct && !m_parsedSelect.hasPartitionColumnInGroupby()) {
                                 topAggNode = null;
@@ -1984,7 +1969,7 @@ public class PlanAssembler {
                             else {
                                 // for aggregate distinct when group by partition column, the top aggregate node
                                 // will be dropped later, thus there is no effect to assign the top_expression_type.
-                                top_expression_type = getTopAggExprType(agg_expression_type);
+                                top_expression_type = ExpressionType.AGGREGATE_SUM;
                             }
                         }
 
@@ -1997,7 +1982,8 @@ public class PlanAssembler {
                          * aggregate node.
                          */
                         else if (agg_expression_type != ExpressionType.AGGREGATE_MIN &&
-                                 agg_expression_type != ExpressionType.AGGREGATE_MAX) {
+                                 agg_expression_type != ExpressionType.AGGREGATE_MAX &&
+                                 agg_expression_type != ExpressionType.AGGREGATE_APPROX_COUNT_DISTINCT) {
                             /*
                              * Unsupported aggregate for push-down (AVG for example).
                              */

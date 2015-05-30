@@ -72,8 +72,6 @@ public class TestApproxCountDistinctSuite extends RegressionSuite {
     public void testDistributed() throws Exception {
         Client client = getClient();
 
-        // This still sends all the rows over the network.
-        // Need to rework the planner to do this right.
         VoltTable vt = client.callProcedure("@Explain", "select approx_count_distinct(bi) from p;")
                 .getResults()[0];
         System.out.println(vt);
