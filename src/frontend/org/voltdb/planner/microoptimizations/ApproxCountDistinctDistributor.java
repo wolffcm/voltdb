@@ -36,6 +36,10 @@ public class ApproxCountDistinctDistributor extends MicroOptimization {
     @Override
     protected AbstractPlanNode recursivelyApply(AbstractPlanNode plan) {
 
+        // This object is re-used for different plans, so must reset state!
+        m_topAggPlanNode = null;
+        m_lowerAggPlanNode = null;
+
         applyHelper(false, plan);
 
         if (m_topAggPlanNode != null && m_lowerAggPlanNode != null) {

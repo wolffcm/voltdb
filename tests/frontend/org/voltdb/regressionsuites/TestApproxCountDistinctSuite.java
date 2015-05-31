@@ -35,7 +35,7 @@ import org.voltdb.compiler.VoltProjectBuilder;
 
 public class TestApproxCountDistinctSuite extends RegressionSuite {
 
-    private static void fillTable(Client client, String tbl) throws NoConnectionsException, IOException, ProcCallException {
+    private static void fillTable(Client client, String tbl) throws Exception {
         Random r = new Random(777);
         for (int i = 0; i < 1000; ++i) {
 
@@ -61,12 +61,17 @@ public class TestApproxCountDistinctSuite extends RegressionSuite {
 
         fillTable(client, "r");
 
-        System.out.println("Finished filling table!");
-
         vt = client.callProcedure("@AdHoc",
                 "select approx_count_distinct(bi), count(distinct bi)  from r;")
                 .getResults()[0];
-        System.out.println(vt);
+        assertTrue(vt.advanceRow());
+        assertEquals(820.529, vt.getDouble(0), 0.01);
+        assertEquals(867, vt.getLong(1));
+        // 867 is the exact count, and 820.529 is our estimate.
+        // That's about 5% error.  Not too bad for 1000 rows?
+        // Percent error will go down as the actual number of unique values
+        // goes up (e.g., should only be 2% for 1 billion unique values).
+        assertFalse(vt.advanceRow());
     }
 
     public void testDistributed() throws Exception {
@@ -74,7 +79,6 @@ public class TestApproxCountDistinctSuite extends RegressionSuite {
 
         VoltTable vt = client.callProcedure("@Explain", "select approx_count_distinct(bi) from p;")
                 .getResults()[0];
-        System.out.println(vt);
 
         vt = client.callProcedure("@AdHoc", "select approx_count_distinct(bi) from p;")
                 .getResults()[0];
@@ -84,12 +88,12 @@ public class TestApproxCountDistinctSuite extends RegressionSuite {
 
         fillTable(client, "p");
 
-        System.out.println("Finished filling table!");
-
         vt = client.callProcedure("@AdHoc",
                 "select approx_count_distinct(bi) from p;")
                 .getResults()[0];
-        System.out.println(vt);
+        assertTrue(vt.advanceRow());
+        assertEquals(820.529, vt.getDouble(0), 0.01);
+        assertFalse(vt.advanceRow());
     }
 
     public TestApproxCountDistinctSuite(String name) {
@@ -103,15 +107,15 @@ public class TestApproxCountDistinctSuite extends RegressionSuite {
         VoltProjectBuilder project = new VoltProjectBuilder();
         final String literalSchema =
                 "CREATE TABLE r ( " +
-                        "pk integer primary key not null, " +
-                        "bi bigint " +
-                        ");" +
-                        "CREATE TABLE p ( " +
-                        "pk integer primary key not null, " +
-                        "bi bigint " +
-                        ");" +
-                        "partition table p on column pk;" +
-                        "";
+                "pk integer primary key not null, " +
+                "bi bigint " +
+                ");" +
+                "CREATE TABLE p ( " +
+                "pk integer primary key not null, " +
+                "bi bigint " +
+                ");" +
+                "partition table p on column pk;" +
+                "";
         try {
             project.addLiteralSchema(literalSchema);
         } catch (IOException e) {

@@ -345,7 +345,7 @@ private:
 class ApproxCountDistinctAgg : public Agg {
 public:
     ApproxCountDistinctAgg()
-        : m_hyperLogLog(REGISTER_BIT_WIDTH)
+        : m_hyperLogLog(registerBitWidth())
     {
     }
 
@@ -407,15 +407,14 @@ protected:
     }
 
     static uint8_t registerBitWidth() {
-        return REGISTER_BIT_WIDTH;
+        // This value is suitable for estimating cardinality for
+        // multisets where elements have 128 bits.
+        // (I.e., everything except VARCHAR and VARBINARY)
+        return 7;
     }
 
 private:
 
-    // This value is suitable for estimating cardinality for
-    // multisets where elements have 128 bits.
-    // (I.e., everything except VARCHAR and VARBINARY)
-    static const uint8_t REGISTER_BIT_WIDTH = 7;
     hll::HyperLogLog m_hyperLogLog;
 };
 
@@ -428,7 +427,6 @@ public:
         // coordinator.
         std::ostringstream oss;
         hyperLogLog().dump(oss);
-        std::cout << "serializing hll with size " << oss.str().length() << "!\n";
         return ValueFactory::getTempBinaryValue(oss.str().c_str(), oss.str().length());
     }
 };
@@ -443,8 +441,7 @@ public:
         int32_t len = ValuePeeker::peekObjectLength_withoutNull(val);
         char* data = static_cast<char*>(ValuePeeker::peekObjectValue_withoutNull(val));
         assert (len > 0);
-        std::cout << "deserializing hll with size " << len << "!\n";
-        std::istringstream iss(data, static_cast<size_t>(len));
+        std::istringstream iss(std::string(data, static_cast<size_t>(len)));
 
         hll::HyperLogLog distHll(registerBitWidth());
         distHll.restore(iss);
