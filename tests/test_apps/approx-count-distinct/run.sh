@@ -1,5 +1,12 @@
 #!/bin/bash
 
+pid=`jps | grep VoltDB | sed s/VoltDB//`
+if [ "$pid" != "" ]; then
+    echo Killing $pid...
+    kill $pid
+    sleep 1
+fi
+
 rm *.jar
 rm procedures/approxcountdistinct/*.class
 rm client/approxcountdistinct/*.class

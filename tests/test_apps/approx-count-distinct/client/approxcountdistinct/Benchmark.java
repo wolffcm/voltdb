@@ -42,22 +42,22 @@
 
 package approxcountdistinct;
 
+import java.io.IOException;
+import java.util.Random;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicLong;
 
 import org.voltdb.CLIConfig;
-import org.voltdb.VoltTable;
 import org.voltdb.client.Client;
 import org.voltdb.client.ClientConfig;
 import org.voltdb.client.ClientFactory;
-import org.voltdb.client.ClientResponse;
 import org.voltdb.client.ClientStats;
 import org.voltdb.client.ClientStatsContext;
 import org.voltdb.client.ClientStatusListenerExt;
-import org.voltdb.client.NullCallback;
-import org.voltdb.client.ProcedureCallback;
+import org.voltdb.client.NoConnectionsException;
+import org.voltdb.client.ProcCallException;
+import org.voltdb.types.TimestampType;
 
 public class Benchmark {
 
@@ -88,7 +88,7 @@ public class Benchmark {
         long displayinterval = 5;
 
         @Option(desc = "Benchmark duration, in seconds.")
-        int duration = 20;
+        int duration = 120;
 
         @Option(desc = "Warmup duration in seconds.")
         int warmup = 2;
@@ -97,7 +97,7 @@ public class Benchmark {
         String servers = "localhost";
 
         @Option(desc = "Maximum TPS rate for benchmark.")
-        int ratelimit = Integer.MAX_VALUE;
+        int ratelimit = 370;
 
         @Option(desc = "Report latency for async benchmark run.")
         boolean latencyreport = false;
@@ -294,6 +294,31 @@ public class Benchmark {
         client.writeSummaryCSV(stats, config.statsfile);
     }
 
+    static private long nextTripId = 333000;
+    static private Random rand = new Random(777);
+
+    private long startTrip() throws NoConnectionsException, IOException, ProcCallException {
+        long tripId = nextTripId;
+        ++nextTripId;
+
+        client.callProcedure("trips.Insert",
+                tripId,
+                rand.nextInt(500000),
+
+                rand.nextLong(),
+                new TimestampType(),
+
+                null,
+                null);
+        return tripId;
+    }
+
+    private void endTrip(long tripId) throws NoConnectionsException, IOException, ProcCallException {
+        client.callProcedure("@AdHoc",
+                "update trips set endRegionId = ?, endTs = ? where tripId = ?",
+                rand.nextLong(), new TimestampType(), tripId);
+    }
+
     /**
      * Core benchmark code.
      * Connect. Initialize. Run the loop. Cleanup. Print Results.
@@ -309,35 +334,34 @@ public class Benchmark {
         connect(config.servers);
 
         // initialize using synchronous call
-        System.out.println("\nPopulating Trips Table\n");
+        System.out.println("\nPopulating trips table with initial data\n");
         client.callProcedure("Initialize");
-//
-//        System.out.print(HORIZONTAL_RULE);
-//        System.out.println(" Starting Benchmark");
-//        System.out.println(HORIZONTAL_RULE);
-//
-//        // Run the benchmark loop for the requested warmup time
-//        // The throughput may be throttled depending on client configuration
-//        System.out.println("Warming up...");
-//        final long warmupEndTime = System.currentTimeMillis() + (1000l * config.warmup);
-//        while (warmupEndTime > System.currentTimeMillis()) {
-//        }
-//
-//        // reset the stats after warmup
-//        fullStatsContext.fetchAndResetBaseline();
-//        periodicStatsContext.fetchAndResetBaseline();
-//
-//        // print periodic statistics to the console
-//        benchmarkStartTS = System.currentTimeMillis();
+
+        System.out.print(HORIZONTAL_RULE);
+        System.out.println(" Starting Benchmark");
+        System.out.println(HORIZONTAL_RULE);
+
+        // Run the benchmark loop for the requested warmup time
+        // The throughput may be throttled depending on client configuration
+        System.out.println("Warming up...");
+        final long warmupEndTime = System.currentTimeMillis() + (1000l * config.warmup);
+        while (warmupEndTime > System.currentTimeMillis()) {
+            long tripId = startTrip();
+            endTrip(tripId);
+        }
+
+        benchmarkStartTS = System.currentTimeMillis();
         schedulePeriodicStats();
-//
-//
-//        // Run the benchmark loop for the requested duration
-//        // The throughput may be throttled depending on client configuration
-//        System.out.println("\nRunning benchmark...");
-//        final long benchmarkEndTime = System.currentTimeMillis() + (1000l * config.duration);
-//        while (benchmarkEndTime > System.currentTimeMillis()) {
-//        }
+
+
+        // Run the benchmark loop for the requested duration
+        // The throughput may be throttled depending on client configuration
+        System.out.println("\nRunning benchmark...");
+        final long benchmarkEndTime = System.currentTimeMillis() + (1000l * config.duration);
+        while (benchmarkEndTime > System.currentTimeMillis()) {
+            long tripId = startTrip();
+            endTrip(tripId);
+        }
 
         // cancel periodic stats printing
         timer.cancel();
