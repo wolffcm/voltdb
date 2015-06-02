@@ -427,7 +427,8 @@ public:
         // coordinator.
         std::ostringstream oss;
         hyperLogLog().dump(oss);
-        return ValueFactory::getTempBinaryValue(oss.str().c_str(), oss.str().length());
+        return ValueFactory::getTempBinaryValue(oss.str().c_str(),
+                                                static_cast<int32_t>(oss.str().length()));
     }
 };
 

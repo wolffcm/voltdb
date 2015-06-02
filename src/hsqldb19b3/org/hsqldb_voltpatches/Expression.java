@@ -159,6 +159,9 @@ public class Expression {
 
     static {
         subqueryAggregateExpressionSet.add(OpTypes.COUNT);
+        // A VoltDB extension APPROX_COUNT_DISTINCT
+        subqueryAggregateExpressionSet.add(OpTypes.APPROX_COUNT_DISTINCT);
+        // End of VoltDB extension
         subqueryAggregateExpressionSet.add(OpTypes.SUM);
         subqueryAggregateExpressionSet.add(OpTypes.MIN);
         subqueryAggregateExpressionSet.add(OpTypes.MAX);
