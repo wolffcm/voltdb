@@ -42,22 +42,28 @@
 
 package approxcountdistinct;
 
+import java.io.BufferedWriter;
+import java.io.FileWriter;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.Random;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.CountDownLatch;
 
 import org.voltdb.CLIConfig;
+import org.voltdb.VoltTable;
 import org.voltdb.client.Client;
 import org.voltdb.client.ClientConfig;
 import org.voltdb.client.ClientFactory;
+import org.voltdb.client.ClientResponse;
 import org.voltdb.client.ClientStats;
 import org.voltdb.client.ClientStatsContext;
 import org.voltdb.client.ClientStatusListenerExt;
 import org.voltdb.client.NoConnectionsException;
+import org.voltdb.client.NullCallback;
 import org.voltdb.client.ProcCallException;
-import org.voltdb.types.TimestampType;
+import org.voltdb.client.ProcedureCallback;
 
 public class Benchmark {
 
@@ -97,7 +103,13 @@ public class Benchmark {
         String servers = "localhost";
 
         @Option(desc = "Maximum TPS rate for benchmark.")
-        int ratelimit = 370;
+        int ratelimit = Integer.MAX_VALUE;
+
+        @Option(desc = "Number of unique values")
+        int numUniqueVals = 1024 * 1024;
+
+        @Option(desc = "Total number of rows in table")
+        int numTotalVals = 1024 * 1024;
 
         @Option(desc = "Report latency for async benchmark run.")
         boolean latencyreport = false;
@@ -294,29 +306,40 @@ public class Benchmark {
         client.writeSummaryCSV(stats, config.statsfile);
     }
 
-    static private long nextTripId = 333000;
-    static private Random rand = new Random(777);
+    static class ReportingCallback implements ProcedureCallback {
 
-    private long startTrip() throws NoConnectionsException, IOException, ProcCallException {
-        long tripId = nextTripId;
-        ++nextTripId;
+        @Override
+        public void clientCallback(ClientResponse clientResponse)
+                throws Exception {
+            if (clientResponse.getStatus() != ClientResponse.SUCCESS) {
+                System.err.println(clientResponse.getStatusString());
+                System.exit(1);
+            }
+        }
 
-        client.callProcedure("trips.Insert",
-                tripId,
-                rand.nextInt(500000),
-
-                rand.nextLong(),
-                new TimestampType(),
-
-                null,
-                null);
-        return tripId;
     }
 
-    private void endTrip(long tripId) throws NoConnectionsException, IOException, ProcCallException {
-        client.callProcedure("@AdHoc",
-                "update trips set endRegionId = ?, endTs = ? where tripId = ?",
-                rand.nextLong(), new TimestampType(), tripId);
+    static private long nextPk = 0;
+    static private Random rand = new Random(777);
+
+    private void insertRow() throws NoConnectionsException, IOException, ProcCallException {
+        long pk = nextPk;
+        ++nextPk;
+
+        client.callProcedure(new ReportingCallback(), "data.Insert",
+                pk,
+                rand.nextInt(config.numUniqueVals));
+    }
+
+    private static String toHumanReadable(long val) {
+        if (val >= 1024 * 1024) {
+            return (val / (1024 * 1024)) + "M";
+        }
+        else if (val >= 1024) {
+            return (val / 1024) + "K";
+        }
+
+        return Long.toString(val);
     }
 
     /**
@@ -334,33 +357,21 @@ public class Benchmark {
         connect(config.servers);
 
         // initialize using synchronous call
-        System.out.println("\nPopulating trips table with initial data\n");
-        client.callProcedure("Initialize");
+        System.out.println("\nPopulating table with data\n");
+        //client.callProcedure("Initialize");
 
         System.out.print(HORIZONTAL_RULE);
         System.out.println(" Starting Benchmark");
         System.out.println(HORIZONTAL_RULE);
 
-        // Run the benchmark loop for the requested warmup time
-        // The throughput may be throttled depending on client configuration
-        System.out.println("Warming up...");
-        final long warmupEndTime = System.currentTimeMillis() + (1000l * config.warmup);
-        while (warmupEndTime > System.currentTimeMillis()) {
-            long tripId = startTrip();
-            endTrip(tripId);
-        }
-
         benchmarkStartTS = System.currentTimeMillis();
         schedulePeriodicStats();
-
 
         // Run the benchmark loop for the requested duration
         // The throughput may be throttled depending on client configuration
         System.out.println("\nRunning benchmark...");
-        final long benchmarkEndTime = System.currentTimeMillis() + (1000l * config.duration);
-        while (benchmarkEndTime > System.currentTimeMillis()) {
-            long tripId = startTrip();
-            endTrip(tripId);
+        while (nextPk < config.numTotalVals) {
+            insertRow();
         }
 
         // cancel periodic stats printing
@@ -371,6 +382,36 @@ public class Benchmark {
 
         // print the summary results
         printResults();
+
+        System.out.println(HORIZONTAL_RULE);
+
+        VoltTable result = client.callProcedure("DoCount").getResults()[0];
+
+        result.advanceRow();
+
+        try(PrintWriter out = new PrintWriter(new BufferedWriter(new FileWriter("bench_perf.dat", true)))) {
+            double exactTime = result.getDouble(3);
+            double approxTime = result.getDouble(1);
+
+            out.printf("\"%s/%s\"        %3.3f        %3.3f\n",
+                    toHumanReadable(config.numTotalVals), toHumanReadable(config.numUniqueVals),
+                    exactTime,
+                    approxTime);
+        } catch (IOException e) {
+        }
+
+        try(PrintWriter out = new PrintWriter(new BufferedWriter(new FileWriter("bench_accuracy.dat", true)))) {
+            long exactAnswer = result.getLong(2);
+            double approxAnswer = result.getDouble(0);
+            double percentError = Math.abs(exactAnswer - approxAnswer) / exactAnswer * 100.0;
+
+            out.printf("\"%s/%s\"        %d        %f      %f\n",
+                    toHumanReadable(config.numTotalVals), toHumanReadable(config.numUniqueVals),
+                    exactAnswer,
+                    approxAnswer,
+                    percentError);
+        } catch (IOException e) {
+        }
 
         // close down the client connections
         client.close();

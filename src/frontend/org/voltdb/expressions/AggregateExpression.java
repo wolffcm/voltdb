@@ -80,7 +80,7 @@ public class AggregateExpression extends AbstractExpression {
             break;
         case AGGREGATE_VALS_TO_HYPERLOGLOG:
             m_valueType = VoltType.VARBINARY;
-            m_valueSize = 256;
+            m_valueSize = 1025;
             break;
         case AGGREGATE_AVG:
         case AGGREGATE_MAX:

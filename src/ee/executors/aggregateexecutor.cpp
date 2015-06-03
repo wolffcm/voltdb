@@ -407,10 +407,14 @@ protected:
     }
 
     static uint8_t registerBitWidth() {
-        // This value is suitable for estimating cardinality for
-        // multisets where elements have 128 bits.
-        // (I.e., everything except VARCHAR and VARBINARY)
-        return 7;
+        // Setting this value higher makes for a more accurate
+        // estimate (based on my experiments), but means that the
+        // hyperloglog sent to the coordinator will be larger.
+        //
+        // This value is called "b" in the hyperloglog code
+        // and papers.  Size of the hyperloglog will be
+        // 2^b + 1 bytes.
+        return 9;
     }
 
 private:

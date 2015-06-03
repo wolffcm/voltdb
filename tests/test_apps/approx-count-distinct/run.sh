@@ -1,5 +1,10 @@
 #!/bin/bash
 
+if [ $# -lt 2 ]; then
+    echo "Specify total rows and number of distinct values"
+    exit 1
+fi
+
 pid=`jps | grep VoltDB | sed s/VoltDB//`
 if [ "$pid" != "" ]; then
     echo Killing $pid...
@@ -28,4 +33,5 @@ sqlcmd < ddl.sql
 
 export CLASSPATH=${CLASSPATH}:/home/cwolff/alt_workspace/voltdb/tests/test_apps/approx-count-distinct/client.jar
 
-java -Dlog4j.configuration=file://${LOG4J} approxcountdistinct.Benchmark
+java -Dlog4j.configuration=file://${LOG4J} approxcountdistinct.Benchmark \
+    --numTotalVals $1 --numUniqueVals $2

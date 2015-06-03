@@ -390,7 +390,7 @@ public class AggregatePlanNode extends AbstractPlanNode {
             int outputSchemaIndex = m_aggregateOutputColumns.get(index);
             SchemaColumn schemaCol = m_outputSchema.getColumns().get(outputSchemaIndex);
             schemaCol.getExpression().setValueType(VoltType.VARBINARY);
-            schemaCol.getExpression().setValueSize(256);
+            schemaCol.getExpression().setValueSize(1025);
         }
     }
 
