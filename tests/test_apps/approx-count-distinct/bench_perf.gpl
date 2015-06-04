@@ -5,9 +5,13 @@ set style histogram clustered gap 2
 set style data histogram
 set xtics rotate by -45
 set grid ytics
-set xlabel "rows/distinct values"
+set xlabel "Number of rows"
 set ylabel "Execution time (ms)"
 set yrange [0:*]
 set key on left
-plot 'bench_perf.dat' using 2:xticlabels(1) ti "count(distinct vals)", \
-'bench_perf.dat' using 3:xtic(1) ti "approx_count_distinct(vals)"
+
+set term png size 1280, 960 font 'Helvetica,20' noenhanced
+set output 'bench_perf.png'
+
+plot 'bench_perf.dat' using 2:xticlabels(1) ti "count(distinct value)", \
+'bench_perf.dat' using 3:xtic(1) ti 'approx_count_distinct(value)'

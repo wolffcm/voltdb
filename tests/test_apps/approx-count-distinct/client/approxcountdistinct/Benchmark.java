@@ -326,17 +326,15 @@ public class Benchmark {
         long pk = nextPk;
         ++nextPk;
 
+        long val = (long) (rand.nextGaussian() * (config.numUniqueVals / 2));
         client.callProcedure(new ReportingCallback(), "data.Insert",
                 pk,
-                rand.nextInt(config.numUniqueVals));
+                val);
     }
 
     private static String toHumanReadable(long val) {
-        if (val >= 1024 * 1024) {
-            return (val / (1024 * 1024)) + "M";
-        }
-        else if (val >= 1024) {
-            return (val / 1024) + "K";
+        if (val >= 1000) {
+            return (val / 1000) + "K";
         }
 
         return Long.toString(val);
@@ -393,8 +391,8 @@ public class Benchmark {
             double exactTime = result.getDouble(3);
             double approxTime = result.getDouble(1);
 
-            out.printf("\"%s/%s\"        %3.3f        %3.3f\n",
-                    toHumanReadable(config.numTotalVals), toHumanReadable(config.numUniqueVals),
+            out.printf("\"%s\"        %3.3f        %3.3f\n",
+                    toHumanReadable(config.numTotalVals),
                     exactTime,
                     approxTime);
         } catch (IOException e) {
@@ -405,8 +403,8 @@ public class Benchmark {
             double approxAnswer = result.getDouble(0);
             double percentError = Math.abs(exactAnswer - approxAnswer) / exactAnswer * 100.0;
 
-            out.printf("\"%s/%s\"        %d        %f      %f\n",
-                    toHumanReadable(config.numTotalVals), toHumanReadable(config.numUniqueVals),
+            out.printf("\"%s\"        %d        %f      %f\n",
+                    toHumanReadable(config.numTotalVals),
                     exactAnswer,
                     approxAnswer,
                     percentError);

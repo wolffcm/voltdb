@@ -1,7 +1,7 @@
 
 create table data (
        pk bigint not null primary key,
-       attr bigint not null,
+       value bigint not null,
 );
 
 partition table data on column pk;

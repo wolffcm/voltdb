@@ -414,7 +414,7 @@ protected:
         // This value is called "b" in the hyperloglog code
         // and papers.  Size of the hyperloglog will be
         // 2^b + 1 bytes.
-        return 9;
+        return 11;
     }
 
 private:

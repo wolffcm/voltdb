@@ -7,8 +7,8 @@ import org.voltdb.VoltType;
 
 public class DoCount extends VoltProcedure {
 
-    final SQLStmt countApprox = new SQLStmt("select approx_count_distinct(attr) from data;");
-    final SQLStmt countExact = new SQLStmt("select count(distinct attr) from data;");
+    final SQLStmt countApprox = new SQLStmt("select approx_count_distinct(value) from data;");
+    final SQLStmt countExact = new SQLStmt("select count(distinct value) from data;");
 
     public VoltTable run() {
 
