@@ -31,7 +31,7 @@ sleep 5
 
 sqlcmd < ddl.sql
 
-export CLASSPATH=${CLASSPATH}:/home/cwolff/alt_workspace/voltdb/tests/test_apps/approx-count-distinct/client.jar
+export CLASSPATH=${CLASSPATH}:${PWD}/client.jar
 
 java -Dlog4j.configuration=file://${LOG4J} approxcountdistinct.Benchmark \
     --numTotalVals $1 --numUniqueVals $2
