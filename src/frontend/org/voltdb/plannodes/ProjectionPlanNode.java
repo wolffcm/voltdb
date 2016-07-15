@@ -47,8 +47,8 @@ public class ProjectionPlanNode extends AbstractPlanNode {
         super.validate();
 
         // Validate Expression Trees
-        for (int ctr = 0; ctr < m_outputSchema.getColumns().size(); ctr++) {
-            SchemaColumn column = m_outputSchema.getColumns().get(ctr);
+        for (int ctr = 0; ctr < getOutputSchema().getColumns().size(); ctr++) {
+            SchemaColumn column = getOutputSchema().getColumns().get(ctr);
             AbstractExpression exp = column.getExpression();
             if (exp == null) {
                 throw new Exception("ERROR: The Output Column Expression at position '" + ctr + "' is NULL");
@@ -63,6 +63,7 @@ public class ProjectionPlanNode extends AbstractPlanNode {
      * column indexes for TVEs within any expressions in these columns)
      * @param schema
      */
+    @Override
     public void setOutputSchema(NodeSchema schema)
     {
         m_outputSchema = schema.clone();
@@ -71,7 +72,7 @@ public class ProjectionPlanNode extends AbstractPlanNode {
 
     public void setOutputSchemaWithoutClone(NodeSchema schema)
     {
-        m_outputSchema = schema;
+        setOutputSchema(schema);
         m_hasSignificantOutputSchema = true;
     }
 
@@ -97,9 +98,9 @@ public class ProjectionPlanNode extends AbstractPlanNode {
     {
         // get all the TVEs in the output columns
         List<TupleValueExpression> output_tves =
-            new ArrayList<TupleValueExpression>();
+            new ArrayList<>();
         int i = 0;
-        for (SchemaColumn col : m_outputSchema.getColumns())
+        for (SchemaColumn col : getOutputSchema().getColumns())
         {
             col.setDifferentiator(i);
             output_tves.addAll(ExpressionUtil.getTupleValueExpressions(col.getExpression()));
@@ -126,7 +127,7 @@ public class ProjectionPlanNode extends AbstractPlanNode {
         // with a tuple value expression that matches what we're going
         // to generate out of the aggregate node
         NodeSchema new_schema = new NodeSchema();
-        for (SchemaColumn col : m_outputSchema.getColumns())
+        for (SchemaColumn col : getOutputSchema().getColumns())
         {
             if (col.getExpression().getExpressionType().isAggregateExpression()) {
                 NodeSchema input_schema = m_children.get(0).getOutputSchema();
@@ -147,7 +148,7 @@ public class ProjectionPlanNode extends AbstractPlanNode {
                 new_schema.addColumn(col.clone());
             }
         }
-        m_outputSchema = new_schema;
+        setOutputSchema(new_schema);
         m_hasSignificantOutputSchema = true;
 
         // Generate the output schema for subqueries

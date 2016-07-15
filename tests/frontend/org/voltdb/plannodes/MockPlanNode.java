@@ -45,7 +45,7 @@ public class MockPlanNode extends AbstractPlanNode
     @Override
     public void generateOutputSchema(Database db)
     {
-        m_outputSchema = new NodeSchema();
+        setOutputSchema(new NodeSchema());
         m_hasSignificantOutputSchema = true;
         for (int i = 0; i < m_columnNames.length; ++i)
         {
@@ -54,7 +54,7 @@ public class MockPlanNode extends AbstractPlanNode
                                                                 m_columnNames[i],
                                                                 m_columnNames[i],
                                                                 i);
-            m_outputSchema.addColumn(new SchemaColumn(m_tableName,
+            getOutputSchema().addColumn(new SchemaColumn(m_tableName,
                                                       m_tableName,
                                                       m_columnNames[i],
                                                       m_columnNames[i],

@@ -115,7 +115,7 @@ public class OrderByPlanNode extends AbstractPlanNode {
         assert(m_children.size() == 1);
         m_children.get(0).resolveColumnIndexes();
         NodeSchema input_schema = m_children.get(0).getOutputSchema();
-        for (SchemaColumn col : m_outputSchema.getColumns())
+        for (SchemaColumn col : getOutputSchema().getColumns())
         {
             // At this point, they'd better all be TVEs.
             assert(col.getExpression() instanceof TupleValueExpression);
@@ -123,7 +123,7 @@ public class OrderByPlanNode extends AbstractPlanNode {
             int index = tve.resolveColumnIndexesUsingSchema(input_schema);
             tve.setColumnIndex(index);
         }
-        m_outputSchema.sortByTveIndex();
+        getOutputSchema().sortByTveIndex();
 
         resolveSortIndexesUsingSchema(input_schema);
     }

@@ -54,20 +54,20 @@ public class AggregatePlanNode extends AbstractPlanNode {
         ;
     }
 
-    protected List<ExpressionType> m_aggregateTypes = new ArrayList<ExpressionType>();
+    protected List<ExpressionType> m_aggregateTypes = new ArrayList<>();
     // a list of whether the aggregate is over distinct elements
     // 0 is not distinct, 1 is distinct
-    protected List<Integer> m_aggregateDistinct = new ArrayList<Integer>();
+    protected List<Integer> m_aggregateDistinct = new ArrayList<>();
     // a list of column offsets/indexes not plan column guids.
-    protected List<Integer> m_aggregateOutputColumns = new ArrayList<Integer>();
+    protected List<Integer> m_aggregateOutputColumns = new ArrayList<>();
     // List of the input TVEs into the aggregates.  Maybe should become
     // a list of SchemaColumns someday
     protected List<AbstractExpression> m_aggregateExpressions =
-        new ArrayList<AbstractExpression>();
+        new ArrayList<>();
 
     // At the moment these are guaranteed to be TVES.  This might always be true
     protected List<AbstractExpression> m_groupByExpressions
-        = new ArrayList<AbstractExpression>();
+        = new ArrayList<>();
 
     // This list is only used for the special case of instances of PartialAggregatePlanNode.
     protected List<Integer> m_partialGroupByColumns = null;
@@ -249,6 +249,7 @@ public class AggregatePlanNode extends AbstractPlanNode {
         return m_groupByExpressions.size();
     }
 
+    @Override
     public void setOutputSchema(NodeSchema schema)
     {
         // aggregates currently have their output schema specified
@@ -290,8 +291,8 @@ public class AggregatePlanNode extends AbstractPlanNode {
     void resolveColumnIndexesUsingSchema(NodeSchema input_schema)
     {
         // get all the TVEs in the output columns
-        List<TupleValueExpression> output_tves = new ArrayList<TupleValueExpression>();
-        for (SchemaColumn col : m_outputSchema.getColumns()) {
+        List<TupleValueExpression> output_tves = new ArrayList<>();
+        for (SchemaColumn col : getOutputSchema().getColumns()) {
             output_tves.addAll(ExpressionUtil.getTupleValueExpressions(col.getExpression()));
         }
         for (TupleValueExpression tve : output_tves) {
@@ -313,7 +314,7 @@ public class AggregatePlanNode extends AbstractPlanNode {
         // Find the proper index for the sort columns.  Not quite
         // sure these should be TVEs in the long term.
         List<TupleValueExpression> agg_tves =
-            new ArrayList<TupleValueExpression>();
+            new ArrayList<>();
         for (AbstractExpression agg_exp : m_aggregateExpressions) {
             agg_tves.addAll(ExpressionUtil.getTupleValueExpressions(agg_exp));
         }
@@ -324,7 +325,7 @@ public class AggregatePlanNode extends AbstractPlanNode {
 
         // Aggregates also need to resolve indexes for group_by inputs
         List<TupleValueExpression> group_tves =
-            new ArrayList<TupleValueExpression>();
+            new ArrayList<>();
         for (AbstractExpression group_exp : m_groupByExpressions) {
             group_tves.addAll(ExpressionUtil.getTupleValueExpressions(group_exp));
         }
@@ -337,7 +338,7 @@ public class AggregatePlanNode extends AbstractPlanNode {
         List<TupleValueExpression> postFilter_tves =
                 ExpressionUtil.getTupleValueExpressions(m_postPredicate);
         for (TupleValueExpression tve : postFilter_tves) {
-            int index = m_outputSchema.getIndexOfTve(tve);
+            int index = getOutputSchema().getIndexOfTve(tve);
             tve.setColumnIndex(index);
         }
 
@@ -395,7 +396,7 @@ public class AggregatePlanNode extends AbstractPlanNode {
         aggExpr.finalizeValueTypes();
 
         int outputSchemaIndex = m_aggregateOutputColumns.get(index);
-        SchemaColumn schemaCol = m_outputSchema.getColumns().get(outputSchemaIndex);
+        SchemaColumn schemaCol = getOutputSchema().getColumns().get(outputSchemaIndex);
         AbstractExpression schemaExpr = schemaCol.getExpression();
         schemaExpr.setValueType(aggExpr.getValueType());
         schemaExpr.setValueSize(aggExpr.getValueSize());

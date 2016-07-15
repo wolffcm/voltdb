@@ -113,7 +113,7 @@ public class IndexCountPlanNode extends AbstractScanPlanNode {
         m_predicate = null;
         m_bindings = isp.getBindings();
 
-        m_outputSchema = apn.getOutputSchema().clone();
+        setOutputSchema(apn.getOutputSchema().clone());
         m_hasSignificantOutputSchema = true;
 
         if (!isp.isReverseScan()) {

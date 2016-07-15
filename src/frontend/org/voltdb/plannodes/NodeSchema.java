@@ -62,7 +62,7 @@ public class NodeSchema
 
     public NodeSchema()
     {
-        m_columns = new ArrayList<SchemaColumn>();
+        m_columns = new ArrayList<>();
         m_columnsMapHelper = new TreeMap<>(new SchemaColumnComparator());
     }
 
@@ -318,7 +318,7 @@ public class NodeSchema
      * Append the provided schema to this schema and return the result
      * as a new schema. Columns order: [this][provided schema columns].
      */
-    NodeSchema join(NodeSchema schema)
+    public NodeSchema join(NodeSchema schema)
     {
         NodeSchema copy = this.clone();
         for (SchemaColumn col: schema.getColumns())

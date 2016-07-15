@@ -54,7 +54,7 @@ public abstract class AbstractJoinPlanNode extends AbstractPlanNode {
     protected AbstractExpression m_joinPredicate = null;
     protected AbstractExpression m_wherePredicate = null;
 
-    protected NodeSchema m_outputSchemaPreInlineAgg = null;
+    private NodeSchema m_outputSchemaPreInlineAgg = null;
 
     protected AbstractJoinPlanNode() {
         super();
@@ -168,9 +168,8 @@ public abstract class AbstractJoinPlanNode extends AbstractPlanNode {
         }
 
         // Join the schema together to form the output schema
-        m_outputSchemaPreInlineAgg =
-            m_children.get(0).getOutputSchema().
-            join(m_children.get(1).getOutputSchema()).copyAndReplaceWithTVE();
+        setOutputSchemaPreInlineAgg(m_children.get(0).getOutputSchema().
+        join(m_children.get(1).getOutputSchema()).copyAndReplaceWithTVE());
         m_hasSignificantOutputSchema = true;
 
         generateRealOutputSchema(db);
@@ -182,9 +181,9 @@ public abstract class AbstractJoinPlanNode extends AbstractPlanNode {
             // generate its subquery output schema
             aggNode.generateOutputSchema(db);
 
-            m_outputSchema = aggNode.getOutputSchema().copyAndReplaceWithTVE();
+            setOutputSchema(aggNode.getOutputSchema().copyAndReplaceWithTVE());
         } else {
-            m_outputSchema = m_outputSchemaPreInlineAgg;
+            setOutputSchema(getOutputSchemaPreInlineAgg());
         }
     }
 
@@ -214,8 +213,8 @@ public abstract class AbstractJoinPlanNode extends AbstractPlanNode {
         resolveSubqueryColumnIndexes();
 
         // Resolve TVE indexes for each schema column.
-        for (int i = 0; i < m_outputSchemaPreInlineAgg.size(); ++i) {
-            SchemaColumn col = m_outputSchemaPreInlineAgg.getColumns().get(i);
+        for (int i = 0; i < getOutputSchemaPreInlineAgg().size(); ++i) {
+            SchemaColumn col = getOutputSchemaPreInlineAgg().getColumns().get(i);
 
             // These will all be TVEs.
             assert(col.getExpression() instanceof TupleValueExpression);
@@ -240,8 +239,8 @@ public abstract class AbstractJoinPlanNode extends AbstractPlanNode {
         // and further ordered by TVE index within the left- and righthand sides.
         // generateOutputSchema already places outer columns on the left and inner on the right,
         // so we just need to order the left- and righthand sides by TVE index separately.
-        m_outputSchemaPreInlineAgg.sortByTveIndex(0, outer_schema.size());
-        m_outputSchemaPreInlineAgg.sortByTveIndex(outer_schema.size(), m_outputSchemaPreInlineAgg.size());
+        getOutputSchemaPreInlineAgg().sortByTveIndex(0, outer_schema.size());
+        getOutputSchemaPreInlineAgg().sortByTveIndex(outer_schema.size(), getOutputSchemaPreInlineAgg().size());
         m_hasSignificantOutputSchema = true;
 
         resolveRealOutputSchema();
@@ -250,10 +249,10 @@ public abstract class AbstractJoinPlanNode extends AbstractPlanNode {
     protected void resolveRealOutputSchema() {
         AggregatePlanNode aggNode = AggregatePlanNode.getInlineAggregationNode(this);
         if (aggNode != null) {
-            aggNode.resolveColumnIndexesUsingSchema(m_outputSchemaPreInlineAgg);
-            m_outputSchema = aggNode.getOutputSchema().clone();
+            aggNode.resolveColumnIndexesUsingSchema(getOutputSchemaPreInlineAgg());
+            setOutputSchema(aggNode.getOutputSchema().clone());
         } else {
-            m_outputSchema = m_outputSchemaPreInlineAgg;
+            setOutputSchema(getOutputSchemaPreInlineAgg());
         }
     }
 
@@ -306,10 +305,10 @@ public abstract class AbstractJoinPlanNode extends AbstractPlanNode {
         stringer.key(Members.JOIN_PREDICATE.name()).value(m_joinPredicate);
         stringer.key(Members.WHERE_PREDICATE.name()).value(m_wherePredicate);
 
-        if (m_outputSchemaPreInlineAgg != m_outputSchema) {
+        if (getOutputSchemaPreInlineAgg() != getOutputSchema()) {
             stringer.key(Members.OUTPUT_SCHEMA_PRE_AGG.name());
             stringer.array();
-            for (SchemaColumn column : m_outputSchemaPreInlineAgg.getColumns()) {
+            for (SchemaColumn column : getOutputSchemaPreInlineAgg().getColumns()) {
                 column.toJSONString(stringer, true);
             }
             stringer.endArray();
@@ -326,15 +325,15 @@ public abstract class AbstractJoinPlanNode extends AbstractPlanNode {
         m_wherePredicate = AbstractExpression.fromJSONChild(jobj, Members.WHERE_PREDICATE.name());
 
         if ( !jobj.isNull( Members.OUTPUT_SCHEMA_PRE_AGG.name() ) ) {
-            m_outputSchemaPreInlineAgg = new NodeSchema();
+            setOutputSchemaPreInlineAgg(new NodeSchema());
             m_hasSignificantOutputSchema = true;
             JSONArray jarray = jobj.getJSONArray( Members.OUTPUT_SCHEMA_PRE_AGG.name() );
             int size = jarray.length();
             for( int i = 0; i < size; i++ ) {
-                m_outputSchemaPreInlineAgg.addColumn( SchemaColumn.fromJSONObject(jarray.getJSONObject(i)) );
+                getOutputSchemaPreInlineAgg().addColumn( SchemaColumn.fromJSONObject(jarray.getJSONObject(i)) );
             }
         } else {
-            m_outputSchemaPreInlineAgg = m_outputSchema;
+            setOutputSchemaPreInlineAgg(getOutputSchema());
         }
     }
 
@@ -468,5 +467,14 @@ public abstract class AbstractJoinPlanNode extends AbstractPlanNode {
     @Override
     public int adjustDifferentiatorField(int differentiator) {
         return differentiator;
+    }
+
+    public NodeSchema getOutputSchemaPreInlineAgg() {
+        return m_outputSchemaPreInlineAgg;
+    }
+
+    public void setOutputSchemaPreInlineAgg(
+            NodeSchema m_outputSchemaPreInlineAgg) {
+        this.m_outputSchemaPreInlineAgg = m_outputSchemaPreInlineAgg;
     }
 }

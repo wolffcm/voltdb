@@ -313,7 +313,7 @@ public abstract class AbstractScanPlanNode extends AbstractPlanNode {
             // Does this operation needs to change complex expressions
             // into tuple value expressions with an column alias?
             // Is this always true for clone?  Or do we need a new method?
-            m_outputSchema = proj.getOutputSchema().copyAndReplaceWithTVE();
+            setOutputSchema(proj.getOutputSchema().copyAndReplaceWithTVE());
             m_hasSignificantOutputSchema = false; // It's just a cheap knock-off of the projection's
         }
         else if (m_tableScanSchema.size() != 0) {
@@ -341,7 +341,7 @@ public abstract class AbstractScanPlanNode extends AbstractPlanNode {
             projectionNode.setOutputSchema(m_tableScanSchema);
             addInlinePlanNode(projectionNode);
             // a bit redundant but logically consistent
-            m_outputSchema = projectionNode.getOutputSchema().copyAndReplaceWithTVE();
+            setOutputSchema(projectionNode.getOutputSchema().copyAndReplaceWithTVE());
             m_hasSignificantOutputSchema = false; // It's just a cheap knock-off of the projection's
         }
         else {
@@ -352,7 +352,7 @@ public abstract class AbstractScanPlanNode extends AbstractPlanNode {
             // where there are no columns in the table that are accessed.
             //
             // Just fill m_outputSchema with the table's columns.
-            m_outputSchema = m_tableSchema.clone();
+            setOutputSchema(m_tableSchema.clone());
             m_hasSignificantOutputSchema = true;
         }
 
@@ -367,7 +367,7 @@ public abstract class AbstractScanPlanNode extends AbstractPlanNode {
             // generate its subquery output schema
             aggNode.generateOutputSchema(db);
 
-            m_outputSchema = aggNode.getOutputSchema().copyAndReplaceWithTVE();
+            setOutputSchema(aggNode.getOutputSchema().copyAndReplaceWithTVE());
             m_hasSignificantOutputSchema = true;
         }
     }
@@ -393,7 +393,7 @@ public abstract class AbstractScanPlanNode extends AbstractPlanNode {
         if (proj != null)
         {
             proj.resolveColumnIndexesUsingSchema(m_tableSchema);
-            m_outputSchema = proj.getOutputSchema().clone();
+            setOutputSchema(proj.getOutputSchema().clone());
             m_hasSignificantOutputSchema = false; // It's just a cheap knock-off of the projection's
         }
         else
@@ -402,7 +402,7 @@ public abstract class AbstractScanPlanNode extends AbstractPlanNode {
             // if there was an inline projection we will have copied these already
             // otherwise we need to iterate through the output schema TVEs
             // and sort them by table schema index order.
-            for (SchemaColumn col : m_outputSchema.getColumns())
+            for (SchemaColumn col : getOutputSchema().getColumns())
             {
                 // At this point, they'd better all be TVEs.
                 assert(col.getExpression() instanceof TupleValueExpression);
@@ -410,7 +410,7 @@ public abstract class AbstractScanPlanNode extends AbstractPlanNode {
                 int index = tve.resolveColumnIndexesUsingSchema(m_tableSchema);
                 tve.setColumnIndex(index);
             }
-            m_outputSchema.sortByTveIndex();
+            getOutputSchema().sortByTveIndex();
         }
 
         // The outputschema of an inline limit node is completely irrelevant to the EE except that
@@ -424,7 +424,7 @@ public abstract class AbstractScanPlanNode extends AbstractPlanNode {
         // based on the different schema of the original raw scan and the projection.
         LimitPlanNode limit = (LimitPlanNode)getInlinePlanNode(PlanNodeType.LIMIT);
         if (limit != null) {
-            limit.m_outputSchema = m_outputSchema.clone();
+            limit.setOutputSchema(getOutputSchema().clone());
             limit.m_hasSignificantOutputSchema = false; // It's just another cheap knock-off
         }
 
@@ -434,8 +434,8 @@ public abstract class AbstractScanPlanNode extends AbstractPlanNode {
         AggregatePlanNode aggNode = AggregatePlanNode.getInlineAggregationNode(this);
 
         if (aggNode != null) {
-            aggNode.resolveColumnIndexesUsingSchema(m_outputSchema);
-            m_outputSchema = aggNode.getOutputSchema().clone();
+            aggNode.resolveColumnIndexesUsingSchema(getOutputSchema());
+            setOutputSchema(aggNode.getOutputSchema().clone());
             // Aggregate plan node change its output schema, and
             // EE does not have special code to get output schema from inlined aggregate node.
             m_hasSignificantOutputSchema = true;

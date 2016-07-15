@@ -40,7 +40,7 @@ public class PartitionByPlanNode extends AbstractPlanNode {
     };
 
     public PartitionByPlanNode() {
-        m_outputSchema = new NodeSchema();
+        setOutputSchema(new NodeSchema());
     }
 
     @Override
@@ -120,9 +120,9 @@ public class PartitionByPlanNode extends AbstractPlanNode {
         // add the windowed column, and then add the input columns.
         // The output schema must have one column, which
         // is an windowed expression.
-        assert(m_outputSchema != null);
-        assert(0 == m_outputSchema.getColumns().size());
-        m_outputSchema.addColumn(m_windowedSchemaColumn);
+        assert(getOutputSchema() != null);
+        assert(0 == getOutputSchema().getColumns().size());
+        getOutputSchema().addColumn(m_windowedSchemaColumn);
         m_hasSignificantOutputSchema = true;
         NodeSchema inputSchema = getChild(0).getOutputSchema();
         assert(inputSchema != null);
@@ -133,7 +133,7 @@ public class PartitionByPlanNode extends AbstractPlanNode {
             // the default column index algorithm will work quite
             // nicely for us.
             SchemaColumn newCol = schemaCol.clone();
-            m_outputSchema.addColumn(newCol);
+            getOutputSchema().addColumn(newCol);
         }
     }
 

@@ -95,9 +95,9 @@ public abstract class AbstractOperationPlanNode extends AbstractPlanNode {
             m_children.get(0).generateOutputSchema(db);
         }
         // Our output schema isn't ever going to change, only generate this once
-        if (m_outputSchema == null)
+        if (getOutputSchema() == null)
         {
-            m_outputSchema = new NodeSchema();
+            setOutputSchema(new NodeSchema());
             // If there is a child node, its output schema will depend on that.
             // If not, mark this flag true to get initialized in EE.
             m_hasSignificantOutputSchema = m_children.size() == 0 ? true : false;
@@ -113,7 +113,7 @@ public abstract class AbstractOperationPlanNode extends AbstractPlanNode {
                                                 "modified_tuples",
                                                 "modified_tuples",
                                                 tve);
-            m_outputSchema.addColumn(col);
+            getOutputSchema().addColumn(col);
         }
         return;
     }

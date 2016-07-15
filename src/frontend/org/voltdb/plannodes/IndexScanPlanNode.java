@@ -139,7 +139,7 @@ public class IndexScanPlanNode extends AbstractScanPlanNode {
         m_lookupType = IndexLookupType.GTE;    // a safe way
         m_sortDirection = sortDirection;
         if (apn != null) {
-            m_outputSchema = apn.m_outputSchema.clone();
+            setOutputSchema(apn.getOutputSchema().clone());
         }
         m_tableScan = srcNode.getTableScan();
     }
