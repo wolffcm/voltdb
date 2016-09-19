@@ -83,3 +83,5 @@ CREATE PROCEDURE FROM CLASS voter.ContestantWinningStates;
 CREATE PROCEDURE FROM CLASS voter.GetStateHeatmap;
 
 END_OF_2ND_BATCH
+
+exec Initialize  6,'Edwina Burnam,Tabatha Gehling,Kelly Clauss,Jessie Alloway,Alana Bregman,Jessie Eichman';

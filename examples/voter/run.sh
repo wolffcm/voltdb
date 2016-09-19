@@ -23,6 +23,9 @@ STARTUPLEADERHOST="localhost"
 # list of cluster nodes separated by commas in host:[port] format
 SERVERS="localhost"
 
+CLIENTCLASSPATH=${CLIENTCLASSPATH}:${VOLTDB_LIB}/kafka-clients-0.8.2.1.jar:${VOLTDB_LIB}/slf4j-api-1.6.2.jar:${VOLTDB_LIB}/slf4j-nop-1.6.2.jar
+
+echo CLIENTCLASSPATH is ${CLIENTCLASSPATH}
 # remove binaries, logs, runtime artifacts, etc... but keep the jars
 function clean() {
     rm -rf voltdbroot log procedures/voter/*.class client/voter/*.class *.log
@@ -55,7 +58,7 @@ function jars-ifneeded() {
 
 # Init to directory voltdbroot
 function voltinit-ifneeded() {
-    voltdb init --force
+    voltdb init --config=./deployment.xml --force
 }
 
 # run the voltdb server locally
@@ -74,6 +77,11 @@ function init() {
 # run the client that drives the example
 function client() {
     async-benchmark
+}
+
+function kafkaclient() {
+    jars-ifneeded
+    java -classpath voter-client.jar:$CLIENTCLASSPATH voter.KafkaVoterClient
 }
 
 # Asynchronous benchmark sample
@@ -97,7 +105,7 @@ function async-benchmark() {
         --maxvotes=2
 }
 
-# trivial client code for illustration purposes
+# Trivial client code for illustration purposes
 function simple-benchmark() {
     jars-ifneeded
     java -classpath voter-client.jar:$CLIENTCLASSPATH -Dlog4j.configuration=file://$LOG4J \

@@ -35,7 +35,7 @@
                 {
                     var data = [['XX',0]];
                     var agg = [0,0,0,0,0,0];
-                    var tot = 1;
+                    var tot = 0;
                     for(var i=0;i<response.results[0].data.length;i++)
                     {
                         if (response.results[0].data[i][3] == 1)
@@ -43,11 +43,18 @@
                         agg[response.results[0].data[i][1]-1] += response.results[0].data[i][2];
                         tot += response.results[0].data[i][2];
                     }
+
                     for(var i=0;i<agg.length;i++)
                     {
                         $('#statdata' + i).text(formatNumber(agg[i]));
-                        $('#pctdata' + i).text(Math.round(100*agg[i]/tot) + "%");
-                        $('#pctbar' + i).css('width', Math.round(100*agg[i]/tot) + "px");
+                        if (tot != 0) {
+                            $('#pctdata' + i).text(Math.round(100*agg[i]/tot) + "%");
+                            $('#pctbar' + i).css('width', Math.round(100*agg[i]/(tot+1)) + "px");
+                        }
+                        else {
+                            $('#pctdata' + i).text("0%");
+                            $('#pctbar' + i).css('width', "0px");
+                        }
                     }
 
                     plot.series[0].data = data;

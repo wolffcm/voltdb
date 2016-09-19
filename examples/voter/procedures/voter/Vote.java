@@ -58,7 +58,9 @@ public class Vote extends VoltProcedure {
     public final SQLStmt insertVoteStmt = new SQLStmt(
             "INSERT INTO votes (phone_number, state, contestant_number) VALUES (?, ?, ?);");
 
-    public long run(long phoneNumber, int contestantNumber, long maxVotesPerPhoneNumber) {
+    private final long MAX_VOTES_PER_PHONE_NUMBER = 2;
+
+    public long run(long phoneNumber, int contestantNumber) {
 
         // Queue up validation statements
         voltQueueSQL(checkContestantStmt, EXPECT_ZERO_OR_ONE_ROW, contestantNumber);
@@ -71,7 +73,7 @@ public class Vote extends VoltProcedure {
         }
 
         if ((validation[1].getRowCount() == 1) &&
-                (validation[1].asScalarLong() >= maxVotesPerPhoneNumber)) {
+              (validation[1].asScalarLong() >= MAX_VOTES_PER_PHONE_NUMBER)) {
             return ERR_VOTER_OVER_VOTE_LIMIT;
         }
 
