@@ -73,4 +73,6 @@
 	<classpathentry kind="lib" path="lib/scala-xml_2.11-1.0.2.jar"/>
 	<classpathentry kind="lib" path="third_party/java/jars/javassist-3.20.0-GA.jar"/>
 	<classpathentry kind="output" path="obj/eclipse"/>
+	<classpathentry combineaccessrules="false" kind="src" path="/calcite-core"/>
+	<classpathentry combineaccessrules="false" kind="src" path="/calcite-linq4j"/>
 </classpath>

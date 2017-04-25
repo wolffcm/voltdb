@@ -469,4 +469,11 @@ public abstract class AbstractJoinPlanNode extends AbstractPlanNode implements I
         return this;
     }
 
+    /**
+     * For Calcite
+     * @param schema
+     */
+    public void setOutputSchemaPreInlineAgg(NodeSchema schema) {
+        m_outputSchemaPreInlineAgg = schema;
+    }
 }
