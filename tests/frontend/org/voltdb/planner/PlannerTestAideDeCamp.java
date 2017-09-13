@@ -75,11 +75,30 @@ public class PlannerTestAideDeCamp {
         proc = db.getProcedures().add(basename);
     }
 
+    private PlannerTestAideDeCamp(String ddlPath, String ddlString) throws Exception {
+        VoltCompiler compiler = new VoltCompiler(false);
+        hsql = HSQLInterface.loadHsqldb(ParameterizationInfo.getParamStateManager());
+        VoltCompiler.DdlProceduresToLoad no_procs = DdlProceduresToLoad.NO_DDL_PROCEDURES;
+        compiler.loadSchemaFromDDLString(hsql, no_procs, ddlPath, ddlString);
+        db = compiler.getCatalogDatabase();
+        proc = db.getProcedures().add("baseProc");
+    }
+
+    public static PlannerTestAideDeCamp fromLiteralDDL(String ddlPath, String ddlString) throws Exception {
+        return new PlannerTestAideDeCamp(ddlPath, ddlString);
+    }
+
     public void tearDown() {
     }
 
     public Database getDatabase() {
         return db;
+    }
+
+    // Just the plan, please
+    public CompiledPlan compileAdHocPlan(String sql) {
+        compile(sql, 0, null, true, false, DeterminismMode.SAFER);
+        return m_currentPlan;
     }
 
     /**

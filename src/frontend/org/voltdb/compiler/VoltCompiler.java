@@ -86,6 +86,7 @@ import org.xml.sax.ErrorHandler;
 import org.xml.sax.SAXException;
 import org.xml.sax.SAXParseException;
 
+import com.google.common.collect.Lists;
 import com.google_voltpatches.common.collect.ImmutableList;
 
 /**
@@ -1042,6 +1043,22 @@ public class VoltCompiler {
         m_catalog.execute("add / clusters cluster");
         Database db = initCatalogDatabase(m_catalog);
         List<VoltCompilerReader> ddlReaderList = DDLPathsToReaderList(ddlFilePaths);
+        final VoltDDLElementTracker voltDdlTracker = new VoltDDLElementTracker(this);
+        InMemoryJarfile jarOutput = new InMemoryJarfile();
+        compileDatabase(db, hsql, voltDdlTracker, null, null, ddlReaderList, null, whichProcs, jarOutput);
+
+        return m_catalog;
+    }
+
+    public Catalog loadSchemaFromDDLString(HSQLInterface hsql,
+            DdlProceduresToLoad whichProcs,
+            String ddlPath, String ddl) throws VoltCompilerException
+    {
+        m_catalog = new Catalog(); //
+        m_catalog.execute("add / clusters cluster");
+        Database db = initCatalogDatabase(m_catalog);
+        VoltCompilerStringReader stringReader = new VoltCompilerStringReader(ddlPath, ddl);
+        List<VoltCompilerReader> ddlReaderList = Lists.newArrayList(stringReader);
         final VoltDDLElementTracker voltDdlTracker = new VoltDDLElementTracker(this);
         InMemoryJarfile jarOutput = new InMemoryJarfile();
         compileDatabase(db, hsql, voltDdlTracker, null, null, ddlReaderList, null, whichProcs, jarOutput);
