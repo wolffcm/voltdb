@@ -1,0 +1,3 @@
+#!/bin/bash
+
+java -Dlog4j.configuration=file://$LOG4J plsql2voltdb.PlSql2JavaTranslator $@

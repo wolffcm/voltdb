@@ -26,6 +26,7 @@ SERVERS="localhost"
 # remove binaries, logs, runtime artifacts, etc... but keep the jars
 function clean() {
     rm -rf voltdbroot log procedures/voter/*.class client/voter/*.class *.log
+    rm -f procedures/voter/Vote.java
 }
 
 # remove everything from "clean" as well as the jarfiles
@@ -141,6 +142,11 @@ function jdbc-benchmark() {
         --maxvotes=2 \
         --contestants=6 \
         --threads=40
+}
+
+function translate() {
+    echo plsqltranslator -ddl ./ddl.sql -dir procedures -package voter plsql/vote.pls
+    plsqltranslator -ddl ./ddl.sql -dir procedures -package voter plsql/vote.pls
 }
 
 function help() {

@@ -86,8 +86,8 @@ import org.xml.sax.ErrorHandler;
 import org.xml.sax.SAXException;
 import org.xml.sax.SAXParseException;
 
-import com.google.common.collect.Lists;
 import com.google_voltpatches.common.collect.ImmutableList;
+import com.google_voltpatches.common.collect.Lists;
 
 /**
  * Compiles a project XML file and some metadata into a Jar file
