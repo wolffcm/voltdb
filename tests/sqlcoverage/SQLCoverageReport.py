@@ -27,11 +27,12 @@ import cgi
 import codecs
 import cPickle
 import decimal
-import datetime
 import os
 import traceback
+from datetime import datetime
 from distutils.util import strtobool
 from optparse import OptionParser
+from time import mktime
 from voltdbclient import VoltColumn, VoltTable, FastSerializer
 
 __quiet = True
@@ -75,7 +76,7 @@ def generate_table_str(res, key):
 
 def generate_modified_query(cmpdb, sql, modified_sql):
     result = ''
-    mod_sql = modified_sql.get(sql, None)
+    mod_sql = modified_sql.get(sql.rstrip(';'), None)
     if mod_sql:
         result = '<p>Modified SQL query, as sent to ' + str(cmpdb) + ':</p><h2>' + str(mod_sql) + '</h2>'
     return result
@@ -181,7 +182,24 @@ def print_section(name, mismatches, output_dir, cmpdb, modified_sql):
 
     return result
 
-def is_different(x, cntonly):
+def time_diff_close_enough(time1, time2, within_minutes):
+    """Test whether two datetimes (TIMESTAMP's) are:
+    1. within a specified number of minutes of each other; and
+    2. within a specified number (the same number) of minutes of right now.
+    If both are true, then they are deemed to be "close enough", on the
+    assumption that they were each set to NOW() or CURRENT_TIMESTAMP(), and
+    the difference is because VoltDB and its comparison database (HSQL or
+    PostgreSQL) called that function at slightly different times.
+    """
+    time_diff_in_minutes = (time1 - time2).total_seconds() / 60
+    if abs(time_diff_in_minutes) > within_minutes:
+        return False
+    time_diff_in_minutes = (time2 - datetime.now()).total_seconds() / 60
+    if abs(time_diff_in_minutes) > within_minutes:
+        return False
+    return True
+
+def is_different(x, cntonly, within_minutes):
     """Notes the attributes that are different. Since the whole table will be
     printed out as a single string.
     the first line is column count,
@@ -260,6 +278,9 @@ def is_different(x, cntonly):
         for jj in xrange(nColumns):
             if jniTuples[ii][jj] == cmpTuples[ii][jj]:
                 continue
+            if (within_minutes and jniColumns[jj].type == FastSerializer.VOLTTYPE_TIMESTAMP and
+                    time_diff_close_enough(jniTuples[ii][jj], cmpTuples[ii][jj], within_minutes)):
+                continue
             if (jniColumns[jj].type == FastSerializer.VOLTTYPE_FLOAT and
                     cmpColumns[jj].type == FastSerializer.VOLTTYPE_DECIMAL):
                 if decimal.Decimal(str(jniTuples[ii][jj])) == cmpTuples[ii][jj]:
@@ -294,8 +315,8 @@ contain the SQL statements which caused different responses on both backends.
 
 def generate_html_reports(suite, seed, statements_path, cmpdb_path, jni_path,
                           output_dir, report_invalid, report_all, extra_stats='',
-                          cmpdb='HSqlDB', modified_sql_path=None, max_mismatches=0,
-                          cntonly=False):
+                          cmpdb='HSqlDB', modified_sql_path=None,
+                          max_mismatches=0, within_minutes=0, cntonly=False):
     if output_dir != None and not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
@@ -349,7 +370,7 @@ def generate_html_reports(suite, seed, statements_path, cmpdb_path, jni_path,
 
             if notFound:
                 crashed.append(statement)
-            elif is_different(statement, cntonly):
+            elif is_different(statement, cntonly, within_minutes):
                 mismatches.append(statement)
             if ('NullPointerException' in str(jni)):
                 voltdb_npes.append(statement)
@@ -384,7 +405,7 @@ def generate_html_reports(suite, seed, statements_path, cmpdb_path, jni_path,
             raise IOError("Unable to read modified SQL file: %s\n  %s" % (modified_sql_path, str(e)))
 
     topLines = getTopSummaryLines(cmpdb, False)
-    currentTime = datetime.datetime.now().strftime("%A, %B %d, %I:%M:%S %p")
+    currentTime = datetime.now().strftime("%A, %B %d, %I:%M:%S %p")
     keyStats = createSummaryInHTML(count, failures, len(mismatches), len(voltdb_npes),
                                    len(cmpdb_npes), extra_stats, seed, max_mismatches)
     report = """
@@ -454,7 +475,9 @@ def getTopSummaryLines(cmpdb, includeAll=True):
         topLines += "<td rowspan=2 align=center>Test Suite</td>"
     topLines += """
 <td colspan=5 align=center>SQL Statements</td>
-<td colspan=5 align=center>Test Failures</td>
+<td colspan=2 align=center>Test Failures</td>
+<td colspan=2 align=center>NPEs</td>
+<td colspan=3 align=center>Crashes</td>
 <td colspan=5 align=center>SQL Statements per Pattern</td>
 <td colspan=5 align=center>Time (min:sec)</td>
 </tr><tr>
@@ -462,10 +485,11 @@ def getTopSummaryLines(cmpdb, includeAll=True):
 <td>Invalid</td><td>Invalid %%</td>
 <td>Total</td>
 <td>Mismatched</td><td>Mismatched %%</td>
-<td>NPE's(V)</td><td>NPE's(%s)</td><td>Crashes</td>
+<td>V</td><td>%s</td>
+<td>V</td><td>%s</td><td>C</td>
 <td>Minimum</td><td>Maximum</td><td># Inserts</td><td># Patterns</td><td># Unresolved</td>
 <td>Generating SQL</td><td>VoltDB</td><td>%s</td>
-""" % (cmpdb[:1], cmpdb)
+""" % (cmpdb[:1], cmpdb[:1], cmpdb)
     if includeAll:
         topLines += "<td>Comparing</td><td>Total</td>"
     topLines += "</tr>"
@@ -563,12 +587,15 @@ h2 {text-transform: uppercase}
 <tr><td align=right bgcolor=#FFFF00>Yellow</td><td>table elements indicate a mild warning, for something you might want to improve (e.g. a pattern
                                                    that generated a very large number of SQL queries, or a somewhat slow test suite).</td></tr>
 <tr><td align=right bgcolor=#D3D3D3>Gray</td><td>table elements indicate data that was not computed, due to a crash.</td></tr>
-<tr><td colspan=2>NPE's(V): number of NullPointerExceptions while running against VoltDB.</td></tr>
-<tr><td colspan=2>NPE's(%s): number of NullPointerExceptions while running against %s (likely in VoltDB's %s backend code).</td></tr>
+<tr><td colspan=2>NPEs/V: number of NullPointerExceptions while running against VoltDB.</td></tr>
+<tr><td colspan=2>NPEs/%s: number of NullPointerExceptions while running against %s (likely in VoltDB's %s backend code).</td></tr>
+<tr><td colspan=2>Crashes/V: number of VoltDB crashes.</td></tr>
+<tr><td colspan=2>Crashes/%s: number of %s crashes.</td></tr>
+<tr><td colspan=2>Crashes/C: number of crashes while comparing VoltDB and %s results.</td></tr>
 </table>
 </body>
 </html>
-""" % (cmpdb, cmpdb, cmpdb[:1], cmpdb, cmpdb)
+""" % (cmpdb, cmpdb, cmpdb[:1], cmpdb, cmpdb, cmpdb[:1], cmpdb, cmpdb)
 
     fd.write(content)
     fd.close()

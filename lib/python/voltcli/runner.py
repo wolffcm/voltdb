@@ -392,7 +392,7 @@ class VerbRunner(object):
             args2 = [verb_name] + list(args[1:])
             self._run_command(verbspace, *args2, **kwargs)
 
-    def call_proc(self, sysproc_name, types, args, check_status=True, timeout=None):
+    def call_proc(self, sysproc_name, types, args, check_status=True, timeout=None, exception_on_failure=False):
         if self.client is None:
             utility.abort('Command is not set up as a client.',
                           'Add an appropriate admin or client bundle to @VOLT.Command().')
@@ -400,7 +400,10 @@ class VerbRunner(object):
         proc = voltdbclient.VoltProcedure(self.client, sysproc_name, types)
         response = proc.call(params=args, timeout=timeout)
         if check_status and response.status != 1:
-            utility.abort('"%s" procedure call failed.' % sysproc_name, (response,))
+            if exception_on_failure:
+                raise Exception('"%s" procedure call failed.' % sysproc_name)
+            else:
+                utility.abort('"%s" procedure call failed.' % sysproc_name, (response,))
         utility.verbose_info(response)
         return utility.VoltResponseWrapper(response)
 
@@ -452,29 +455,34 @@ class VerbRunner(object):
             utility.abort('Resource file "%s" is missing.' % name)
         return None
 
-    def voltdb_connect(self, host, port, username=None, password=None, ssl_config=None):
+    def voltdb_connect(self, host, port, username=None, password=None, ssl_config=None, kerberos=None):
         """
         Create a VoltDB client connection.
         """
         self.voltdb_disconnect()
         try:
-            kwargs = {}
-            if username:
-                kwargs['username'] = username
-                if password:
-                    kwargs['password'] = password
-                else:
-                    """
-                    If a username was specified and a password was not, prompt the user for the pwd.
-                    """
-                    kwargs['password'] = getpass('Enter your password: ')
-            if ssl_config:
-                kwargs['usessl'] = True
-                kwargs['ssl_config_file'] = ssl_config
-
-            self.client = FastSerializer(host, port, **kwargs)
+            self.__voltdb_connect__(host, port, username, password, ssl_config, kerberos)
         except Exception, e:
             utility.abort(e)
+
+    def __voltdb_connect__(self, host, port, username=None, password=None, ssl_config=None, kerberos=None):
+        kwargs = {}
+        if username:
+            kwargs['username'] = username
+            if password:
+                kwargs['password'] = password
+            else:
+                """
+                If a username was specified and a password was not, prompt the user for the pwd.
+                """
+                kwargs['password'] = getpass('Enter your password: ')
+        if ssl_config:
+            kwargs['usessl'] = True
+            kwargs['ssl_config_file'] = ssl_config
+        if kerberos:
+            kwargs['kerberos'] = True
+
+        self.client = FastSerializer(host, port, **kwargs)
 
     def voltdb_disconnect(self):
         """

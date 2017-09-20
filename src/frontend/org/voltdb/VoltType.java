@@ -309,7 +309,7 @@ public enum VoltType {
             // Normally, only compatible NON-ARRAY types are listed,
             // but byte array is included here as the special case
             // most suitable representation of VARBINARY.
-            new Class[] {byte[].class, },
+            new Class[] {byte[].class, Byte[].class},
             byte[][].class,
             'l',
             java.sql.Types.VARBINARY,  // java.sql.Types DATA_TYPE
@@ -600,7 +600,7 @@ public enum VoltType {
             new VoltType[(VOLT_TYPE_MAX_ENUM)+1];
     static {
         ImmutableMap.Builder<Class<?>, VoltType> b = ImmutableMap.builder();
-        HashMap<Class<?>, VoltType> validation = new HashMap<Class<?>, VoltType>();
+        HashMap<Class<?>, VoltType> validation = new HashMap<>();
         for (VoltType type : values()) {
             s_types[type.m_value] = type;
             for (Class<?> cls : type.m_classes) {
@@ -639,6 +639,17 @@ public enum VoltType {
             throw new RuntimeException("Unsupported type " + this);
         }
         return m_classes[0];
+    }
+
+    /**
+     * Return the java class that is matched to the given value.
+     *
+     * @param value
+     * @return The java class.
+     */
+    public static Class<?> classFromByteValue(byte value) {
+        VoltType returnVT = VoltType.get(value);
+        return returnVT.classFromType();
     }
 
     /** Return the java class that is matched to a given <tt>VoltType</tt>.
@@ -690,13 +701,19 @@ public enum VoltType {
                 return type;
             }
         }
+
         if (str.equalsIgnoreCase("DOUBLE")) {
             return FLOAT;
         }
+
         if (str.equalsIgnoreCase("CHARACTER") ||
                 str.equalsIgnoreCase("CHAR") ||
                 str.equalsIgnoreCase("VARCHAR")) {
             return STRING;
+        }
+
+        if (str.equalsIgnoreCase("BINARY")) {
+            return VoltType.VARBINARY;
         }
 
         throw new RuntimeException("Can't find type: " + str);
@@ -1208,7 +1225,7 @@ public enum VoltType {
     private static final Long MAX_BIGINT = new Long(Long.MAX_VALUE);
     /** Max value for a <code>TIMESTAMP</code> index component. */
     private static final Long MAX_TIMESTAMP = new Long(Long.MAX_VALUE);
-    /** Max value for a <code>FLOAT</code> index component.ß */
+    /** Max value for a <code>FLOAT</code> index component. */
     private static final Float MAX_FLOAT = new Float(Float.MAX_VALUE);
 
     // for consistency at the API level, provide symbolic nulls for these types, too

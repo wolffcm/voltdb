@@ -33,16 +33,20 @@ import org.voltdb.common.Constants;
 import org.voltdb.planner.BoundPlan;
 import org.voltdb.planner.CompiledPlan;
 import org.voltdb.planner.CorePlan;
+import org.voltdb.planner.ParameterizationInfo;
 import org.voltdb.planner.PlanningErrorException;
 import org.voltdb.planner.QueryPlanner;
 import org.voltdb.planner.StatementPartitioning;
 import org.voltdb.planner.TrivialCostModel;
 import org.voltdb.plannodes.AbstractPlanNode;
+import org.voltdb.utils.CompressionService;
 import org.voltdb.utils.Encoder;
 
 /**
  * Planner tool accepts an already compiled VoltDB catalog and then
  * interactively accept SQL and outputs plans on standard out.
+ *
+ * Used only for ad hoc queries.
  */
 public class PlannerTool {
     private static final VoltLogger hostLog = new VoltLogger("HOST");
@@ -55,8 +59,6 @@ public class PlannerTool {
     private final HSQLInterface m_hsql;
     private static PlannerStatsCollector m_plannerStats;
 
-    private static final int AD_HOC_JOINED_TABLE_LIMIT = 5;
-
     public PlannerTool(final Database database, byte[] catalogHash)
     {
         assert(database != null);
@@ -66,9 +68,9 @@ public class PlannerTool {
         m_cache = AdHocCompilerCache.getCacheForCatalogHash(catalogHash);
 
         // LOAD HSQL
-        m_hsql = HSQLInterface.loadHsqldb();
+        m_hsql = HSQLInterface.loadHsqldb(ParameterizationInfo.getParamStateManager());
         String binDDL = m_database.getSchema();
-        String ddl = Encoder.decodeBase64AndDecompress(binDDL);
+        String ddl = CompressionService.decodeBase64AndDecompress(binDDL);
         String[] commands = ddl.split("\n");
         for (String command : commands) {
             String decoded_cmd = Encoder.hexDecodeToString(command);
@@ -103,14 +105,19 @@ public class PlannerTool {
     public PlannerTool updateWhenNoSchemaChange(Database database, byte[] catalogHash) {
         m_database = database;
         m_catalogHash = catalogHash;
+        m_cache = AdHocCompilerCache.getCacheForCatalogHash(catalogHash);
 
         return this;
+    }
+
+    public HSQLInterface getHSQLInterface() {
+        return m_hsql;
     }
 
 
     public AdHocPlannedStatement planSqlForTest(String sqlIn) {
         StatementPartitioning infer = StatementPartitioning.inferPartitioning();
-        return planSql(sqlIn, infer, false, null);
+        return planSql(sqlIn, infer, false, null, false);
     }
 
     private void logException(Exception e, String fmtLabel) {
@@ -126,7 +133,7 @@ public class PlannerTool {
         QueryPlanner planner = new QueryPlanner(
             sql, "PlannerTool", "PlannerToolProc", m_database,
             partitioning, m_hsql, estimates, !VoltCompiler.DEBUG_MODE,
-            AD_HOC_JOINED_TABLE_LIMIT, costModel, null, null, DeterminismMode.FASTER);
+            costModel, null, null, DeterminismMode.FASTER);
 
         CompiledPlan plan = null;
         try {
@@ -155,8 +162,8 @@ public class PlannerTool {
         return plan;
     }
 
-    synchronized AdHocPlannedStatement planSql(String sqlIn, StatementPartitioning partitioning,
-            boolean isExplainMode, final Object[] userParams) {
+    public synchronized AdHocPlannedStatement planSql(String sqlIn, StatementPartitioning partitioning,
+            boolean isExplainMode, final Object[] userParams, boolean isSwapTables) {
 
         CacheUse cacheUse = CacheUse.FAIL;
         if (m_plannerStats != null) {
@@ -202,13 +209,17 @@ public class PlannerTool {
             QueryPlanner planner = new QueryPlanner(
                     sql, "PlannerTool", "PlannerToolProc", m_database,
                     partitioning, m_hsql, estimates, !VoltCompiler.DEBUG_MODE,
-                    AD_HOC_JOINED_TABLE_LIMIT, costModel, null, null, DeterminismMode.FASTER);
+                    costModel, null, null, DeterminismMode.FASTER);
 
             CompiledPlan plan = null;
             String[] extractedLiterals = null;
             String parsedToken = null;
             try {
-                planner.parse();
+                if (isSwapTables) {
+                    planner.planSwapTables();
+                } else {
+                    planner.parse();
+                }
                 parsedToken = planner.parameterize();
 
                 // check the parameters count

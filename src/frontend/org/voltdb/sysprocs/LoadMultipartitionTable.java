@@ -98,7 +98,7 @@ public class LoadMultipartitionTable extends VoltSystemProcedure
                 // report -1 rows inserted, though this might be false
                 result.addRow(-1);
             }
-            return new DependencyPair(DEP_distribute, result);
+            return new DependencyPair.TableDependencyPair(DEP_distribute, result);
 
         } else if (fragmentId == SysProcFragmentId.PF_aggregate) {
             long[] modifiedTuples = new long[context.getNumberOfPartitions()];
@@ -128,7 +128,7 @@ public class LoadMultipartitionTable extends VoltSystemProcedure
                 rowsModified += l;
 
             result.addRow(rowsModified);
-            return new DependencyPair(DEP_aggregate, result);
+            return new DependencyPair.TableDependencyPair(DEP_aggregate, result);
         }
 
         // must handle every dependency id.
@@ -203,7 +203,7 @@ public class LoadMultipartitionTable extends VoltSystemProcedure
         // ensure MP fragment tasks load the plan for the table loading procedure
         m_runner.setProcNameToLoadForFragmentTasks(crudProcName);
 
-        Statement catStmt = proc.getStatements().get(VoltDB.ANON_STMT_NAME);
+        Statement catStmt = proc.getStatements().get(VoltDB.ANON_STMT_NAME + "0");
         if (catStmt == null) {
             throw new VoltAbortException(
                     String.format("Unable to find SQL statement for found table %s: BAD",

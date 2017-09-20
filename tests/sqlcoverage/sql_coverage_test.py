@@ -112,6 +112,8 @@ def run_once(name, command, statements_path, results_path,
     print "  command: %s" % (command)
     print "  statements_path: %s" % (statements_path)
     print "  results_path: %s" % (results_path)
+    if precision:
+        print "  precision: %s" % (precision)
     sys.stdout.flush()
 
     host = defaultHost
@@ -127,17 +129,23 @@ def run_once(name, command, statements_path, results_path,
         server = subprocess.Popen(command + " backend=" + name, shell=True)
 
     client = None
+    clientException = None
     for i in xrange(30):
         try:
             client = VoltQueryClient(host, port)
             client.set_quiet(True)
             client.set_timeout(5.0) # 5 seconds
             break
-        except socket.error:
+        except socket.error as e:
+            clientException = e
             time.sleep(1)
 
     if client == None:
-        print >> sys.stderr, "Unable to connect/create client"
+        print >> sys.stderr, "Unable to connect/create client: there may be a problem with the VoltDB server or its ports:"
+        print >> sys.stderr, "name:", str(name)
+        print >> sys.stderr, "host:", str(host)
+        print >> sys.stderr, "port:", str(port)
+        print >> sys.stderr, "client (socket.error) exception:", str(clientException)
         sys.stderr.flush()
         return -1
 
@@ -266,9 +274,12 @@ def run_config(suite_name, config, basedir, output_dir, random_seed,
     time0 = time.time()
 
     precision = 0
+    within_minutes = 0
     for key in config.iterkeys():
         if key == "precision":
             precision = int(config["precision"])
+        elif key == "within-minutes":
+            within_minutes = int(config["within-minutes"])
         elif not os.path.isabs(config[key]):
             config[key] = get_config_path(basedir, key, config[key])
         print "in run_config key = '%s', config[key] = '%s'" % (key, str(config[key]))
@@ -347,7 +358,7 @@ def run_config(suite_name, config, basedir, output_dir, random_seed,
     gensql_time = print_elapsed_seconds("for generating statements (" + suite_name + ")", time0)
     total_gensql_time += gensql_time
 
-    num_crashes = 0
+    volt_crashes = 0
     failed = False
     try:
         if run_once("jni", command, statements_path, jni_path,
@@ -361,8 +372,7 @@ def run_config(suite_name, config, basedir, output_dir, random_seed,
     if (failed):
         print >> sys.stderr, "  jni_path: %s" % (jni_path)
         sys.stderr.flush()
-        num_crashes += 1
-        #exit(1)
+        volt_crashes += 1
 
     # Print the elapsed time, with a message
     global total_voltdb_time
@@ -372,11 +382,13 @@ def run_config(suite_name, config, basedir, output_dir, random_seed,
     random.seed(random_seed)
     random.setstate(random_state)
 
+    cmp_crashes  = 0
+    diff_crashes = 0
     failed = False
     try:
         if run_once(comparison_database_lower, command, statements_path, cmpdb_path,
                     submit_verbosely, testConfigKit, precision) != 0:
-            print >> sys.stderr, "Test with the " + comparison_database + " backend had errors (crash?)."
+            print >> sys.stderr, "Test with the " + comparison_database + " backend had errors (crash? Connection refused?)."
             failed = True
     except:
         print >> sys.stderr, comparison_database + " backend crashed!!"
@@ -385,8 +397,7 @@ def run_config(suite_name, config, basedir, output_dir, random_seed,
     if (failed):
         print >> sys.stderr, "  cmpdb_path: %s" % (cmpdb_path)
         sys.stderr.flush()
-        num_crashes += 1
-        #exit(1)
+        cmp_crashes += 1
 
     # Print the elapsed time, with a message
     global total_cmpdb_time
@@ -401,7 +412,9 @@ def run_config(suite_name, config, basedir, output_dir, random_seed,
                  get_time_html_table_element(gensql_time) +
                  get_time_html_table_element(voltdb_time) +
                  get_time_html_table_element(cmpdb_time) )
-    extraStats = get_numerical_html_table_element(num_crashes, error_above=0) + someStats
+    extraStats = (get_numerical_html_table_element(volt_crashes, error_above=0) +
+                  get_numerical_html_table_element(cmp_crashes,  error_above=0) +
+                  get_numerical_html_table_element(diff_crashes, error_above=0) + someStats )
     max_mismatches = get_max_mismatches(comparison_database, suite_name)
 
     global compare_results
@@ -409,21 +422,23 @@ def run_config(suite_name, config, basedir, output_dir, random_seed,
         compare_results = imp.load_source("normalizer", config["normalizer"]).compare_results
         success = compare_results(suite_name, random_seed, statements_path, cmpdb_path,
                                   jni_path, output_dir, report_invalid, report_all, extraStats,
-                                  comparison_database, modified_sql_path, max_mismatches)
+                                  comparison_database, modified_sql_path, max_mismatches, within_minutes)
     except:
         print >> sys.stderr, "Compare (VoltDB & " + comparison_database + ") results crashed!"
         traceback.print_exc()
         print >> sys.stderr, "  jni_path: %s" % (jni_path)
         print >> sys.stderr, "  cmpdb_path: %s" % (cmpdb_path)
         sys.stderr.flush()
-        num_crashes += 1
+        diff_crashes += 1
         gray_zero_html_table_element = get_numerical_html_table_element(0, use_gray=True)
         errorStats = (gray_zero_html_table_element + gray_zero_html_table_element +
                       gray_zero_html_table_element + gray_zero_html_table_element +
                       gray_zero_html_table_element + gray_zero_html_table_element +
                       gray_zero_html_table_element + gray_zero_html_table_element +
                       gray_zero_html_table_element +
-                      get_numerical_html_table_element(num_crashes, error_above=0) + someStats + '</tr>' )
+                      get_numerical_html_table_element(volt_crashes, error_above=0) +
+                      get_numerical_html_table_element(cmp_crashes,  error_above=0) +
+                      get_numerical_html_table_element(diff_crashes, error_above=0) + someStats + '</tr>' )
         success = {"keyStats": errorStats, "mis": -1}
 
     # Print & save the elapsed time and total time, with a message
@@ -462,7 +477,9 @@ def run_config(suite_name, config, basedir, output_dir, random_seed,
     global keyStats_start_index
     global total_volt_npes
     global total_cmp_npes
-    global total_num_crashes
+    global total_volt_crashes
+    global total_cmp_crashes
+    global total_diff_crashes
     global total_num_inserts
     global total_num_patterns
     global total_num_unresolved
@@ -478,7 +495,9 @@ def run_config(suite_name, config, basedir, output_dir, random_seed,
     next_keyStats_column_value()  # ignore Mismatched %
     total_volt_npes       += int(next_keyStats_column_value())
     total_cmp_npes        += int(next_keyStats_column_value())
-    total_num_crashes     += num_crashes
+    total_volt_crashes    += volt_crashes
+    total_cmp_crashes     += cmp_crashes
+    total_diff_crashes    += diff_crashes
     total_num_inserts     += num_inserts
     total_num_patterns    += num_patterns
     total_num_unresolved  += num_unresolved
@@ -688,7 +707,9 @@ if __name__ == "__main__":
     total_statements = 0
     total_volt_npes = 0
     total_cmp_npes = 0
-    total_num_crashes  = 0
+    total_volt_crashes = 0
+    total_cmp_crashes  = 0
+    total_diff_crashes = 0
     total_num_inserts  = 0
     total_num_patterns = 0
     total_num_unresolved = 0
@@ -828,7 +849,9 @@ if __name__ == "__main__":
                            "\n<td align=right>" + mismatched_percent + "%</td>" + \
                            "\n<td align=right>" + str(total_volt_npes) + "</td>" + \
                            "\n<td align=right>" + str(total_cmp_npes) + "</td>" + \
-                           "\n<td align=right>" + str(total_num_crashes) + "</td>" + \
+                           "\n<td align=right>" + str(total_volt_crashes) + "</td>" + \
+                           "\n<td align=right>" + str(total_cmp_crashes) + "</td>" + \
+                           "\n<td align=right>" + str(total_diff_crashes) + "</td>" + \
                            "\n<td align=right>" + str(min_all_statements_per_pattern) + "</td>" + \
                            "\n<td align=right>" + str(max_all_statements_per_pattern) + "</td>" + \
                            "\n<td align=right>" + str(total_num_inserts) + "</td>" + \
@@ -842,6 +865,8 @@ if __name__ == "__main__":
     generate_summary(output_dir, statistics, comparison_database)
 
     # Print the total time, for each type of activity
+    sys.stdout.flush()
+    sys.stderr.flush()
     print_seconds(total_gensql_time, "for generating ALL SQL statements")
     print_seconds(total_voltdb_time, "for running ALL VoltDB (JNI) statements")
     print_seconds(total_cmpdb_time,  "for running ALL " + comparison_database + " statements")
@@ -858,8 +883,16 @@ if __name__ == "__main__":
         print "Total number of VoltDB NullPointerExceptions (NPEs): %d" % total_volt_npes
     if mismatched_statements > 0:
         print "Total number of mismatched statements (i.e., test failures): %d" % mismatched_statements
-    if total_num_crashes > 0:
-        print "Total number of (VoltDB, " + comparison_database + ", or compare results) crashes: %d" % total_num_crashes
+    if total_volt_crashes > 0 or total_cmp_crashes > 0 or total_diff_crashes > 0:
+        crash_types = []
+        if total_volt_crashes > 0:
+            crash_types.append("VoltDB ("+str(total_volt_crashes)+")")
+        if total_cmp_crashes > 0:
+            crash_types.append(comparison_database + " ("+str(total_cmp_crashes)+")")
+        if total_diff_crashes > 0:
+            crash_types.append("compare results ("+str(total_diff_crashes)+")")
+        print "Total number of (" + ", ".join(crash_types) + ") crashes: %d" % (
+                total_volt_crashes + total_cmp_crashes + total_diff_crashes)
         success = False
 
     if not success:

@@ -589,7 +589,7 @@ public abstract class AbstractExpression implements JSONString, Cloneable {
             }
 
             if (m_inBytes) {
-                assert(m_valueType == VoltType.STRING);
+                assert(m_valueType.isVariableLength());
                 stringer.keySymbolValuePair(Members.IN_BYTES, true);
             }
         }
@@ -1063,8 +1063,8 @@ public abstract class AbstractExpression implements JSONString, Cloneable {
      *      OPERATOR_NOT
      *      COMPARISON_IN
      *      OPERATOR_IS_NULL
-     *      AggregageExpression
-     *
+     *      AggregateExpression
+     *      OPERATOR_UNARY_MINUS
      * @return Does this expression need a right expression to be valid?
      */
     public boolean needsRightExpression() {
@@ -1285,7 +1285,21 @@ public abstract class AbstractExpression implements JSONString, Cloneable {
             msg.append("with aggregate expression(s) is not supported.");
             return false;
         }
+        if (hasUserDefinedFunctionExpression()) {
+            msg.append("with user defined function calls is not supported.");
+            return false;
+        }
         return true;
+    }
+
+    private boolean hasUserDefinedFunctionExpression() {
+        List<FunctionExpression> funcs = findAllSubexpressionsOfClass(FunctionExpression.class);
+        for (FunctionExpression func : funcs) {
+            if (func.isUserDefined()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public boolean hasSubquerySubexpression() {
@@ -1414,7 +1428,7 @@ public abstract class AbstractExpression implements JSONString, Cloneable {
      * which can make an expression unsafe for use in creating
      * materialized views on non-empty tables.
      */
-    public static class MVUnsafeOperators {
+    public static class UnsafeOperatorsForDDL {
         public final void add(String opName) {
             m_oplist.append(m_sep)
                     .append(opName);
@@ -1442,19 +1456,19 @@ public abstract class AbstractExpression implements JSONString, Cloneable {
      * we get all the way through the search we are happy, and
      * return true.
      */
-    public void findNonemptyMVSafeOperations(MVUnsafeOperators ops) {
-        if ( ! m_type.isMVSafe()) {
+    public void findUnsafeOperatorsForDDL(UnsafeOperatorsForDDL ops) {
+        if ( ! m_type.isSafeForDDL()) {
             ops.add(m_type.symbol());
         }
         if (m_left != null) {
-            m_left.findNonemptyMVSafeOperations(ops);
+            m_left.findUnsafeOperatorsForDDL(ops);
         }
         if (m_right != null) {
-            m_right.findNonemptyMVSafeOperations(ops);
+            m_right.findUnsafeOperatorsForDDL(ops);
         }
         if (m_args != null) {
             for (AbstractExpression arg : m_args) {
-                arg.findNonemptyMVSafeOperations(ops);
+                arg.findUnsafeOperatorsForDDL(ops);
             }
         }
     }

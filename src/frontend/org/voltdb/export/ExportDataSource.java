@@ -114,6 +114,9 @@ public class ExportDataSource implements Comparable<ExportDataSource> {
     private final LinkedTransferQueue<RunnableWithES> m_queuedActions = new LinkedTransferQueue<>();
     private RunnableWithES m_firstAction = null;
 
+    // Record the stacktrace of when this data source calls drain to help debug a race condition.
+    private volatile Exception m_drainTraceForDebug = null;
+
     /**
      * Create a new data source.
      * @param db
@@ -486,6 +489,8 @@ public class ExportDataSource implements Comparable<ExportDataSource> {
                     m_pollFuture = null;
                 }
                 if (m_onDrain != null) {
+                    m_drainTraceForDebug = new Exception("Push USO " + uso + " endOfStream " + endOfStream +
+                                                         " poll " + poll);
                     m_onDrain.run();
                 }
             } else {
@@ -607,6 +612,14 @@ public class ExportDataSource implements Comparable<ExportDataSource> {
             @Override
             public void run() {
                 try {
+                    //This happens if site mastership triggers and this generation becomes active and so truncate task is not stashed but executed aftre accept mastership task.
+                    //If this happens the truncate for this generation wont happen means more dupes will be exported.
+                    if (m_mastershipAccepted.get()) {
+                        if (exportLog.isDebugEnabled()) {
+                            exportLog.debug("Export generation " + getGeneration() + " Table " + getTableName() + " mastership already accepted for partition skipping truncation." + getPartitionId());
+                        }
+                        return;
+                    }
                     m_committedBuffers.truncateToTxnId(txnId, m_nullArrayLength);
                     if (m_committedBuffers.isEmpty() && m_endOfStream) {
                         if (m_pollFuture != null) {
@@ -614,6 +627,7 @@ public class ExportDataSource implements Comparable<ExportDataSource> {
                             m_pollFuture = null;
                         }
                         if (m_onDrain != null) {
+                            m_drainTraceForDebug = new Exception("Truncation txnId " + txnId);
                             m_onDrain.run();
                         }
                     }
@@ -749,6 +763,7 @@ public class ExportDataSource implements Comparable<ExportDataSource> {
                     //We are closing source.
                 }
                 if (m_onDrain != null) {
+                    m_drainTraceForDebug = new Exception();
                     m_onDrain.run();
                 }
                 return;
@@ -800,6 +815,12 @@ public class ExportDataSource implements Comparable<ExportDataSource> {
                     ackingContainer.discard();
                 }
                 m_pollFuture = null;
+
+                if (m_drainTraceForDebug != null) {
+                    //Making this an ERROR. Looks like this is happening when ackImpl initiates drains and pollImpl is submitted to execute.
+                    exportLog.error("Rolling generation " + m_generation + " before it is fully drained. " +
+                                            "Drain was called from " + Throwables.getStackTraceAsString(m_drainTraceForDebug));
+                }
             }
         } catch (Throwable t) {
             fut.setException(t);
@@ -825,7 +846,7 @@ public class ExportDataSource implements Comparable<ExportDataSource> {
                         m_backingCont.discard();
                         try {
                             if (!getLocalExecutorService().isShutdown()) {
-                                ackImpl(m_uso);
+                                ackImpl(m_uso, null);
                             }
                         } finally {
                             forwardAckToOtherReplicas(m_uso);
@@ -843,15 +864,19 @@ public class ExportDataSource implements Comparable<ExportDataSource> {
 
     private void forwardAckToOtherReplicas(long uso) {
         if (m_runEveryWhere && m_replicaRunning) {
-           //we dont forward if we are running as replica in replicated export
-           return;
+            //we dont forward if we are running as replica in replicated export
+            return;
+        } else if (!m_runEveryWhere && !m_mastershipAccepted.get()) {
+            // Don't forward acks if we are a replica in non-replicated export mode.
+            return;
         }
+
         Pair<Mailbox, ImmutableList<Long>> p = m_ackMailboxRefs.get();
         Mailbox mbx = p.getFirst();
         if (mbx != null && p.getSecond().size() > 0) {
             // partition:int(4) + length:int(4) +
-            // signaturesBytes.length + ackUSO:long(8) + 2 bytes for runEverywhere or not.
-            final int msgLen = 4 + 4 + m_signatureBytes.length + 8 + 2;
+            // signaturesBytes.length + ackUSO:long(8) + 2 bytes for runEverywhere or not + 8 bytes for generation ID.
+            final int msgLen = 4 + 4 + m_signatureBytes.length + 8 + 2 + 8;
 
             ByteBuffer buf = ByteBuffer.allocate(msgLen);
             buf.putInt(m_partitionId);
@@ -859,6 +884,7 @@ public class ExportDataSource implements Comparable<ExportDataSource> {
             buf.put(m_signatureBytes);
             buf.putLong(uso);
             buf.putShort((m_runEveryWhere ? (short )1 : (short )0));
+            buf.putLong(m_generation);
 
 
             BinaryPayloadMessage bpm = new BinaryPayloadMessage(new byte[0], buf.array());
@@ -869,7 +895,7 @@ public class ExportDataSource implements Comparable<ExportDataSource> {
         }
     }
 
-    public void ack(final long uso, boolean runEveryWhere) {
+    public void ack(final long uso, boolean runEveryWhere, long srcHSId, long generation) {
         // If I am not master and run everywhere connector and I get ack to start replicating....do so and become a exporting replica.
         if (m_runEveryWhere && !m_isMaster && runEveryWhere) {
             //These are single threaded so no need to lock.
@@ -886,13 +912,31 @@ public class ExportDataSource implements Comparable<ExportDataSource> {
             return;
         }
 
+        final Exception captureAckCallStack = new Exception("Ack message received from " + CoreUtils.hsIdToString(srcHSId) +
+                                                            " for generation " + generation +
+                                                            ", current generation is " + m_generation);
+
         //In replicated only master will be doing this.
         RunnableWithES runnable = new RunnableWithES("ack") {
             @Override
             public void run() {
                 try {
-                    if (!getLocalExecutorService().isShutdown()) {
-                       ackImpl(uso);
+                    // ENG-12282: A race condition between export data source
+                    // master promotion and getting acks from the previous
+                    // failed master can occur. The failed master could have
+                    // sent out an ack with Long.MIN and fails immediately after
+                    // that, which causes a new master to be elected. The
+                    // election and the receiving of this ack message happens on
+                    // two different threads on the new master. If it's promoted
+                    // while processing the ack, the ack may call `m_onDrain`
+                    // while the other thread is polling buffers, which may
+                    // never get discarded.
+                    //
+                    // Now that we are on the same thread, check to see if we
+                    // are already promoted to be the master. If so, ignore the
+                    // ack.
+                    if (!getLocalExecutorService().isShutdown() && !m_mastershipAccepted.get()) {
+                       ackImpl(uso, captureAckCallStack);
                     }
                 } catch (Exception e) {
                     exportLog.error("Error acking export buffer", e);
@@ -905,9 +949,10 @@ public class ExportDataSource implements Comparable<ExportDataSource> {
         stashOrSubmitTask(runnable, true, false);
     }
 
-     private void ackImpl(long uso) {
+     private void ackImpl(long uso, Exception ackCallStack) {
 
         if (uso == Long.MIN_VALUE && m_onDrain != null) {
+            m_drainTraceForDebug = new Exception("Acking USO " + uso, ackCallStack);
             m_onDrain.run();
             return;
         }
@@ -1046,6 +1091,10 @@ public class ExportDataSource implements Comparable<ExportDataSource> {
         }
 
         synchronized(m_executorLock) {
+            if (exportLog.isDebugEnabled()) {
+                exportLog.debug("Activating ExportDataSource gen " + m_generation
+                                    + " table " + m_tableName + " partition " + m_partitionId + "FirstAction: " + (m_firstAction != null ? "true" : "false"));
+            }
             if (m_executor==null) {
                 ListeningExecutorService es = CoreUtils.getListeningExecutorService(
                             "ExportDataSource gen " + m_generation

@@ -49,14 +49,21 @@ public class HSQLInterface {
     /**
      * Naming conventions for unnamed indexes and constraints
      */
+    public static final String AUTO_GEN_PREFIX = "VOLTDB_AUTOGEN_";
+
+    // Prefixes for system-generated indexes that enforce constraints
+    public static final String AUTO_GEN_IDX_PREFIX = AUTO_GEN_PREFIX + "IDX_";
+    public static final String AUTO_GEN_PRIMARY_KEY_PREFIX = AUTO_GEN_IDX_PREFIX + "PK_";
+    public static final String AUTO_GEN_UNIQUE_IDX_PREFIX = AUTO_GEN_IDX_PREFIX + "CT_";
+    public static final String AUTO_GEN_NAMED_CONSTRAINT_IDX = AUTO_GEN_PREFIX + "CONSTRAINT_IDX_";
+
+    // Prefixes for indexes on materialized views
     public static final String AUTO_GEN_MATVIEW = "MATVIEW_PK_";
     public static final String AUTO_GEN_MATVIEW_IDX = AUTO_GEN_MATVIEW + "INDEX";
+
+    // Prefixes for constraints
+    public static final String AUTO_GEN_CONSTRAINT_PREFIX = AUTO_GEN_PREFIX + "CT_";
     public static final String AUTO_GEN_MATVIEW_CONST = AUTO_GEN_MATVIEW + "CONSTRAINT";
-    public static final String AUTO_GEN_PREFIX = "VOLTDB_AUTOGEN_";
-    public static final String AUTO_GEN_IDX_PREFIX = AUTO_GEN_PREFIX + "IDX_";
-    public static final String AUTO_GEN_CONSTRAINT_PREFIX = AUTO_GEN_IDX_PREFIX + "CT_";
-    public static final String AUTO_GEN_PRIMARY_KEY_PREFIX = AUTO_GEN_IDX_PREFIX + "PK_";
-    public static final String AUTO_GEN_CONSTRAINT_WRAPPER_PREFIX = AUTO_GEN_PREFIX + "CONSTRAINT_IDX_";
 
     /**
      * The spacer to use for nested XML elements
@@ -94,7 +101,7 @@ public class HSQLInterface {
 
     }
 
-    Session sessionProxy;
+    private Session sessionProxy;
     // Keep track of the previous XML for each table in the schema
     Map<String, VoltXMLElement> lastSchema = new TreeMap<>();
     // empty schema for cloning and for null diffs
@@ -117,12 +124,26 @@ public class HSQLInterface {
     }
 
     /**
+     * This class lets HSQL inform VoltDB of the number of parameters
+     * in the current statement, without directly referencing any VoltDB
+     * classes.
+     *
+     * Any additional parameters introduced after HSQL parsing (such as
+     * for subqueries with outer references or paramterization of ad hoc
+     * queries) will need to come after parameters created by HSQL.
+     */
+    public static abstract interface ParameterStateManager {
+        public int getNextParamIndex();
+        public void resetCurrentParamIndex();
+    }
+
+    /**
      * Load up an HSQLDB in-memory instance.
      *
      * @return A newly initialized in-memory HSQLDB instance accessible
      * through the returned instance of HSQLInterface
      */
-    public static HSQLInterface loadHsqldb() {
+    public static HSQLInterface loadHsqldb(ParameterStateManager psMgr) {
         // Specifically set the timezone to UTC to avoid the default usage local timezone in HSQL.
         // This ensures that all VoltDB data paths use the same timezone for representing time.
         TimeZone.setDefault(TimeZone.getTimeZone("GMT+0"));
@@ -135,7 +156,7 @@ public class HSQLInterface {
             Session sessionProxy = DatabaseManager.newSession(DatabaseURL.S_MEM, name, "SA", "", props, 0);
             // make HSQL case insensitive
             sessionProxy.executeDirectStatement("SET IGNORECASE TRUE;");
-
+            sessionProxy.setParameterStateManager(psMgr);
             return new HSQLInterface(sessionProxy);
         }
         catch (HsqlException caught) {
